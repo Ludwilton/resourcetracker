@@ -3,7 +3,6 @@ package com.resourcetracker;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
-import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.AsyncBufferedImage;
@@ -30,8 +29,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
-import java.util.LinkedHashSet;
+
+
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -273,7 +272,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
 
 		// Add keybinding for focusing the search bar
-		KeyStroke ctrlF = KeyStroke.getKeyStroke(KeyEvent.VK_F, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask());
+		KeyStroke ctrlF = KeyStroke.getKeyStroke(KeyEvent.VK_F, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
 		getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ctrlF, "focusSearch");
 		getActionMap().put("focusSearch", new AbstractAction()
 		{
@@ -700,8 +699,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 				}
 
 				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
-				trackedItems.add(newItem);
-				plugin.saveTrackedItems(trackedItems);
+				addTrackedItem(newItem);
 				clearSearchAndRebuild();
 			}
 			catch (NumberFormatException ex)

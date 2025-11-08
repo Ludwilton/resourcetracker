@@ -11,6 +11,7 @@ public class TrackedItem
 	private Integer goalAmount;
 	private String category = "Default";
 
+	@SuppressWarnings("unused")
 	public TrackedItem()
 	{
 		// Default constructor for Gson

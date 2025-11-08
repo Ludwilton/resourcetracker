@@ -114,38 +114,41 @@ public class ResourceTrackerPlugin extends Plugin
 		}
 	}
 
-	private void updateBankItems(ItemContainer itemContainer)
-	{
-		if (itemContainer == null)
-		{
-			return;
-		}
+    private void updateBankItems(ItemContainer itemContainer)
+    {
+        if (itemContainer == null)
+        {
+            return;
+        }
 
-		Map<Integer, Integer> bankItems = new HashMap<>();
-		for (Item item : itemContainer.getItems())
-		{
-			if (item.getId() > 0)
-			{
-				bankItems.merge(item.getId(), item.getQuantity(), Integer::sum);
-			}
-		}
+        Map<Integer, Integer> bankItems = new HashMap<>();
+        for (Item item : itemContainer.getItems())
+        {
+            if (item.getId() > 0)
+            {
+                bankItems.merge(item.getId(), item.getQuantity(), Integer::sum);
+            }
+        }
 
-		boolean needsUpdate = false;
-		for (TrackedItem trackedItem : panel.getTrackedItems())
-		{
-			int amount = bankItems.getOrDefault(trackedItem.getItemId(), 0);
-			if (panel.updateItemAmount(trackedItem.getItemId(), amount))
-			{
-				needsUpdate = true;
-			}
-		}
+        boolean needsUpdate = false;
+        List<TrackedItem> items = panel.getTrackedItems();
 
-		if (needsUpdate)
-		{
-			saveTrackedItems(panel.getTrackedItems());
-			panel.rebuild();
-		}
-	}
+        for (TrackedItem trackedItem : items)
+        {
+            int amount = bankItems.getOrDefault(trackedItem.getItemId(), 0);
+            if (trackedItem.getCurrentAmount() != amount)
+            {
+                trackedItem.setCurrentAmount(amount);
+                needsUpdate = true;
+            }
+        }
+
+        if (needsUpdate)
+        {
+            saveTrackedItems(items);
+            panel.rebuild();
+        }
+    }
 
 	public void saveTrackedItems(List<TrackedItem> items)
 	{
