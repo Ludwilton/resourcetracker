@@ -34,6 +34,6 @@ Items are organized into custom categories, and the plugin automatically updates
     -   **Export**: Right-click a category header and select "Export Category". The item data will be copied to your clipboard as a JSON string.
     -   **Import**: Copy a valid JSON string of item data, then right-click the desired category header and select "Import from Clipboard". This will add or update all items from the string into that category.
 
-### Support & Suggestions
+## Support & Suggestions
 
 If you have suggestions, want to contribute or need support, feel free to join the Discord server [here.](https://discord.gg/dhCrh4whQW)
