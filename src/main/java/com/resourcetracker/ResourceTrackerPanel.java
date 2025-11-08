@@ -14,8 +14,13 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -24,6 +29,28 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 {
+	private static class ItemDefinition
+	{
+		private final int id;
+		private final String name;
+
+		ItemDefinition(int id, String name)
+		{
+			this.id = id;
+			this.name = name;
+		}
+
+		public int getId()
+		{
+			return id;
+		}
+
+		public String getName()
+		{
+			return name;
+		}
+	}
+
 	private final ResourceTrackerPlugin plugin;
 	private final ItemManager itemManager;
 
@@ -299,6 +326,75 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		rebuildTrackedItems();
 	}
 
+	public void exportCategory(String categoryName)
+	{
+		List<TrackedItem> categoryItems = trackedItems.stream()
+			.filter(item -> item.getCategory().equals(categoryName))
+			.collect(Collectors.toList());
+
+		if (categoryItems.isEmpty())
+		{
+			return;
+		}
+
+		String json = plugin.getGson().toJson(categoryItems);
+		final StringSelection stringSelection = new StringSelection(json);
+		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
+	}
+
+	public void importCategoryFromClipboard(String targetCategory)
+	{
+		try
+		{
+			Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+			if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor))
+			{
+				String json = (String) clipboard.getData(DataFlavor.stringFlavor);
+				importCategory(json, targetCategory);
+			}
+			else
+			{
+				JOptionPane.showMessageDialog(this, "No text found on clipboard.", "Import Error", JOptionPane.ERROR_MESSAGE);
+			}
+		}
+		catch (UnsupportedFlavorException | IOException e)
+		{
+			log.warn("Failed to read from clipboard", e);
+			JOptionPane.showMessageDialog(this, "Could not read from clipboard.", "Import Error", JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
+	public void importCategory(String json, String targetCategory)
+	{
+		try
+		{
+			java.lang.reflect.Type listType = new com.google.gson.reflect.TypeToken<ArrayList<TrackedItem>>(){}.getType();
+			List<TrackedItem> importedItems = plugin.getGson().fromJson(json, listType);
+
+			if (importedItems == null || importedItems.isEmpty())
+			{
+				return;
+			}
+
+			// Update category and add to list
+			for (TrackedItem importedItem : importedItems)
+			{
+				importedItem.setCategory(targetCategory);
+				// Remove existing item if present
+				trackedItems.removeIf(existing -> existing.getItemId() == importedItem.getItemId());
+				trackedItems.add(importedItem);
+			}
+
+			plugin.saveTrackedItems(trackedItems);
+			rebuildTrackedItems();
+		}
+		catch (Exception e)
+		{
+			log.error("Failed to import category data", e);
+			JOptionPane.showMessageDialog(this, "Invalid data format.", "Import Error", JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
 	private void createNewCategory(String categoryName)
 	{
 		if (categoryName == null || categoryName.trim().isEmpty())
@@ -473,39 +569,28 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 					return;
 				}
 
-				// Check if already tracked
+				// Check if already tracked, if so, update it
 				for (TrackedItem existing : trackedItems)
 				{
 					if (existing.getItemId() == itemDef.getId())
 					{
-						return; // Ignore duplicates
+						existing.setGoalAmount((int) goal);
+						plugin.saveTrackedItems(trackedItems);
+						clearSearchAndRebuild();
+						return;
 					}
 				}
 
-				// Use selected category
+				// If not tracked, add as a new item
 				if (selectedCategory == null || selectedCategory.isEmpty())
 				{
 					return; // Should not happen since search is disabled without category
 				}
 
 				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), (int) goal, selectedCategory);
-
-				// Add the item
 				trackedItems.add(newItem);
 				plugin.saveTrackedItems(trackedItems);
-
-				// Clear the goal field immediately
-				goalField.setText("");
-
-				// Hide search and show updated categories
-				searchBar.setText("");
-				contentWrapper.removeAll();
-				contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
-				contentWrapper.revalidate();
-				contentWrapper.repaint();
-
-				// Force rebuild
-				rebuildTrackedItems();
+				clearSearchAndRebuild();
 			}
 			catch (NumberFormatException ex)
 			{
@@ -519,6 +604,17 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		panel.add(rightPanel, BorderLayout.EAST);
 
 		return panel;
+	}
+
+	private void clearSearchAndRebuild()
+	{
+		// Clear the goal field immediately
+		searchBar.setText("");
+		contentWrapper.removeAll();
+		contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+		contentWrapper.revalidate();
+		contentWrapper.repaint();
+		rebuildTrackedItems();
 	}
 
 
@@ -576,28 +672,5 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			// Single revalidate at the very end
 			itemListPanel.revalidate();
 		});
-	}
-
-
-	private static class ItemDefinition
-	{
-		private final int id;
-		private final String name;
-
-		ItemDefinition(int id, String name)
-		{
-			this.id = id;
-			this.name = name;
-		}
-
-		public int getId()
-		{
-			return id;
-		}
-
-		public String getName()
-		{
-			return name;
-		}
 	}
 }

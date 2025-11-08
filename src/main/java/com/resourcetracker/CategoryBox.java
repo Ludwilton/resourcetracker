@@ -8,6 +8,7 @@ import net.runelite.client.util.AsyncBufferedImage;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
@@ -73,6 +74,16 @@ public class CategoryBox extends JPanel
 		// Add context menu for category management
 		final JPopupMenu categoryPopup = new JPopupMenu();
 		categoryPopup.setBorder(new EmptyBorder(5, 5, 5, 5));
+
+		JMenuItem exportCategory = new JMenuItem("Export Category");
+		exportCategory.addActionListener(e -> parentPanel.exportCategory(categoryName));
+		categoryPopup.add(exportCategory);
+
+		JMenuItem importCategory = new JMenuItem("Import from Clipboard");
+		importCategory.addActionListener(e -> parentPanel.importCategoryFromClipboard(categoryName));
+		categoryPopup.add(importCategory);
+
+		categoryPopup.addSeparator();
 
 		JMenuItem deleteCategory = new JMenuItem("Delete Category");
 		deleteCategory.addActionListener(e -> {
@@ -244,7 +255,6 @@ public class CategoryBox extends JPanel
 		// Context menu
 		final JPopupMenu popupMenu = new JPopupMenu();
 		popupMenu.setBorder(new EmptyBorder(5, 5, 5, 5));
-		slotContainer.setComponentPopupMenu(popupMenu);
 
 		JMenuItem editItem = new JMenuItem("Edit Goal");
 		editItem.addActionListener(ev -> openEditDialog(item));
@@ -254,7 +264,25 @@ public class CategoryBox extends JPanel
 		deleteItem.addActionListener(ev -> parentPanel.removeTrackedItem(item));
 		popupMenu.add(deleteItem);
 
+		setComponentPopupMenu(slotContainer, popupMenu);
+
 		return slotContainer;
+	}
+
+	private void setComponentPopupMenu(Component component, final JPopupMenu popup)
+	{
+		if (component instanceof JComponent)
+		{
+			((JComponent) component).setComponentPopupMenu(popup);
+		}
+
+		if (component instanceof Container)
+		{
+			for (Component c : ((Container) component).getComponents())
+			{
+				setComponentPopupMenu(c, popup);
+			}
+		}
 	}
 
 	private void openEditDialog(TrackedItem item)
@@ -296,4 +324,3 @@ public class CategoryBox extends JPanel
 		}
 	}
 }
-

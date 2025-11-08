@@ -56,6 +56,11 @@ public class ResourceTrackerPlugin extends Plugin
 	private NavigationButton navButton;
 	private final Gson gson = new Gson();
 
+	public Gson getGson()
+	{
+		return gson;
+	}
+
 	@Override
 	protected void startUp() throws Exception
 	{
