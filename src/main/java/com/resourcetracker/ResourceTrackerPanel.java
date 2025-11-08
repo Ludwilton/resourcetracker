@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class ResourceTrackerPanel extends PluginPanel
+public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 {
 	private final ResourceTrackerPlugin plugin;
 	private final ItemManager itemManager;
@@ -169,6 +169,36 @@ public class ResourceTrackerPanel extends PluginPanel
 
 		// Start with items panel visible
 		contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+	}
+
+	@Override
+	public Dimension getPreferredScrollableViewportSize()
+	{
+		return getPreferredSize();
+	}
+
+	@Override
+	public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
+	{
+		return 16;
+	}
+
+	@Override
+	public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+	{
+		return 16;
+	}
+
+	@Override
+	public boolean getScrollableTracksViewportWidth()
+	{
+		return true;
+	}
+
+	@Override
+	public boolean getScrollableTracksViewportHeight()
+	{
+		return false;
 	}
 
 	public void addTrackedItem(TrackedItem item)
