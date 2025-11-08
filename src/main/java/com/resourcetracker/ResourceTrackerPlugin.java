@@ -68,7 +68,7 @@ public class ResourceTrackerPlugin extends Plugin
 
 		panel = new ResourceTrackerPanel(this, itemManager);
 
-		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/icon.png");
+        final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/com/resourcetracker/icon.png");
 
 		navButton = NavigationButton.builder()
 			.tooltip("Resource Tracker")
