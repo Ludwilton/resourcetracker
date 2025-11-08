@@ -6,7 +6,6 @@ import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.IconTextField;
-import net.runelite.client.ui.components.PluginErrorPanel;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.SwingUtil;
 
@@ -15,8 +14,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -28,16 +25,15 @@ public class ResourceTrackerPanel extends PluginPanel
 	private final ResourceTrackerPlugin plugin;
 	private final ItemManager itemManager;
 
-	// When there is no tracked items, display this
-	private final PluginErrorPanel errorPanel = new PluginErrorPanel();
-
 	private final JPanel itemListPanel;
-	private final JPanel topPanel;
+	private final JPanel searchResultsPanel;
+	private final JPanel contentWrapper;
+	private final JScrollPane searchScrollPane;
+	private final JScrollPane itemScrollPane;
 	private final IconTextField searchBar;
 	private final List<TrackedItem> trackedItems;
-	private final List<ItemDefinition> availableItems;
-	private boolean searchMode = false;
-	private String searchTargetCategory = null; // Category to add searched items to
+	private final List<CategoryBox> categoryBoxes = new ArrayList<>();
+	private String selectedCategory = null;
 	private static final int MAX_SEARCH_RESULTS = 30;
 	private Timer searchDebounceTimer;
 
@@ -47,51 +43,75 @@ public class ResourceTrackerPanel extends PluginPanel
 		this.plugin = plugin;
 		this.itemManager = itemManager;
 		this.trackedItems = new ArrayList<>();
-		this.availableItems = new ArrayList<>();
-
-		initializeItemList();
 
 		setBorder(new EmptyBorder(6, 6, 6, 6));
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 		setLayout(new BorderLayout());
 
-		// Create layout panel for wrapping
+		// Create main layout panel
 		final JPanel layoutPanel = new JPanel();
 		layoutPanel.setLayout(new BoxLayout(layoutPanel, BoxLayout.Y_AXIS));
 		add(layoutPanel, BorderLayout.NORTH);
 
-		// Top panel with category menu button and search bar
-		topPanel = new JPanel();
-		topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
-		topPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Search area - always visible at top
+		JPanel searchAreaPanel = new JPanel();
+		searchAreaPanel.setLayout(new BoxLayout(searchAreaPanel, BoxLayout.Y_AXIS));
+		searchAreaPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		searchAreaPanel.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARK_GRAY_COLOR.darker()),
+			new EmptyBorder(5, 5, 5, 5)
+		));
 
-		// Category menu button
-		JPanel categoryMenuPanel = new JPanel(new BorderLayout());
-		categoryMenuPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		categoryMenuPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
+		// Category name input field
+		JTextField categoryNameField = new JTextField();
+		categoryNameField.setPreferredSize(new Dimension(0, 30));
+		categoryNameField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		categoryNameField.setForeground(Color.GRAY);
+		categoryNameField.setText("New category name...");
+		categoryNameField.setCaretColor(Color.WHITE);
+		categoryNameField.addFocusListener(new java.awt.event.FocusAdapter()
+		{
+			@Override
+			public void focusGained(java.awt.event.FocusEvent e)
+			{
+				if (categoryNameField.getText().equals("New category name..."))
+				{
+					categoryNameField.setText("");
+					categoryNameField.setForeground(Color.WHITE);
+				}
+			}
 
-		JButton addCategoryButton = new JButton("+ New Category");
-		addCategoryButton.setPreferredSize(new Dimension(0, 30));
-		addCategoryButton.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		addCategoryButton.setForeground(Color.WHITE);
-		addCategoryButton.setFocusPainted(false);
-		addCategoryButton.addActionListener(e -> createNewCategory());
-		categoryMenuPanel.add(addCategoryButton, BorderLayout.CENTER);
+			@Override
+			public void focusLost(java.awt.event.FocusEvent e)
+			{
+				if (categoryNameField.getText().isEmpty())
+				{
+					categoryNameField.setText("New category name...");
+					categoryNameField.setForeground(Color.GRAY);
+				}
+			}
+		});
+		categoryNameField.addActionListener(e ->
+		{
+			String categoryName = categoryNameField.getText().trim();
+			if (!categoryName.isEmpty() && !categoryName.equals("New category name..."))
+			{
+				createNewCategory(categoryName);
+				categoryNameField.setText("New category name...");
+				categoryNameField.setForeground(Color.GRAY);
+			}
+		});
 
-		topPanel.add(categoryMenuPanel);
+		searchAreaPanel.add(categoryNameField);
 
 		// Search bar
-		JPanel searchPanel = new JPanel(new BorderLayout());
-		searchPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		searchPanel.setBorder(new EmptyBorder(0, 5, 5, 5));
-
 		searchBar = new IconTextField();
 		searchBar.setIcon(IconTextField.Icon.SEARCH);
-		searchBar.setPreferredSize(new Dimension(100, 30));
-		searchBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		searchBar.setPreferredSize(new Dimension(0, 30));
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-		searchBar.setVisible(false); // Hidden by default
+		searchBar.setEnabled(false); // Disabled by default
+		searchBar.setToolTipText("Open a category to search for items");
 		searchBar.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
@@ -114,41 +134,55 @@ public class ResourceTrackerPanel extends PluginPanel
 		});
 		searchBar.addClearListener(this::onSearchChanged);
 
-		searchPanel.add(searchBar, BorderLayout.CENTER);
-		topPanel.add(searchPanel);
+		searchAreaPanel.add(Box.createRigidArea(new Dimension(0, 5)));
+		searchAreaPanel.add(searchBar);
 
 
-		layoutPanel.add(topPanel);
+		layoutPanel.add(searchAreaPanel);
 
-		// Scrollable item list - wrapped in scroll pane
+		// Wrapper panel for content (search results OR tracked items)
+		contentWrapper = new JPanel(new BorderLayout());
+		contentWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		layoutPanel.add(contentWrapper);
+
+		// Search results panel - shown when searching
+		searchResultsPanel = new JPanel();
+		searchResultsPanel.setLayout(new BoxLayout(searchResultsPanel, BoxLayout.Y_AXIS));
+		searchResultsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		searchScrollPane = new JScrollPane(searchResultsPanel);
+		searchScrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		searchScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+		searchScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		searchScrollPane.setBorder(null);
+
+		// Tracked items panel
 		itemListPanel = new JPanel();
 		itemListPanel.setLayout(new BoxLayout(itemListPanel, BoxLayout.Y_AXIS));
 		itemListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		JScrollPane scrollPane = new JScrollPane(itemListPanel);
-		scrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
-		scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		itemScrollPane = new JScrollPane(itemListPanel);
+		itemScrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		itemScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+		itemScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		itemScrollPane.setBorder(null);
 
-		layoutPanel.add(scrollPane);
-
-		// Add error panel
-		errorPanel.setContent("Resource Tracker", "You have not tracked any items yet.");
-		add(errorPanel);
+		// Start with items panel visible
+		contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
 	}
 
 	public void addTrackedItem(TrackedItem item)
 	{
 		trackedItems.add(item);
 		plugin.saveTrackedItems(trackedItems);
-		rebuild();
+		rebuildTrackedItems();
 	}
 
 	public void removeTrackedItem(TrackedItem item)
 	{
 		trackedItems.remove(item);
 		plugin.saveTrackedItems(trackedItems);
-		rebuild();
+		rebuildTrackedItems();
 	}
 
 	public void updateItemAmount(int itemId, int amount)
@@ -165,7 +199,7 @@ public class ResourceTrackerPanel extends PluginPanel
 		if (updated)
 		{
 			plugin.saveTrackedItems(trackedItems);
-			rebuild();
+			rebuildTrackedItems();
 		}
 	}
 
@@ -178,54 +212,73 @@ public class ResourceTrackerPanel extends PluginPanel
 	{
 		trackedItems.clear();
 		trackedItems.addAll(items);
-		rebuild();
+		rebuildTrackedItems();
 	}
 
-	private void initializeItemList()
+	public void rebuild()
 	{
-		// Load all items from ItemManager's cache
-		// Note: ItemManager.search() will be used dynamically during search
-		// We don't need to pre-populate availableItems anymore
+		rebuildTrackedItems();
 	}
 
-	private void createNewCategory()
+	public void setSelectedCategory(String category)
 	{
-		String categoryName = JOptionPane.showInputDialog(this, "Enter category name:", "New Category", JOptionPane.PLAIN_MESSAGE);
-		if (categoryName != null && !categoryName.trim().isEmpty())
+		// Close all other categories, open this one
+		selectedCategory = category;
+		searchBar.setEnabled(true); // Enable search when category is selected
+
+		// Update search bar placeholder/tooltip
+		searchBar.setToolTipText("Search items to add to " + category);
+
+		for (CategoryBox box : categoryBoxes)
 		{
-			final String trimmedCategoryName = categoryName.trim();
-
-			// Check if category already exists
-			boolean exists = trackedItems.stream()
-				.anyMatch(item -> item.getCategory().equalsIgnoreCase(trimmedCategoryName));
-
-			if (exists)
+			if (!box.getCategoryName().equals(category) && !box.isCollapsed())
 			{
-				JOptionPane.showMessageDialog(this, "Category already exists!", "Duplicate Category", JOptionPane.WARNING_MESSAGE);
-				return;
+				box.collapse();
 			}
-
-			// Show search for this category
-			showSearchForCategory(trimmedCategoryName);
 		}
 	}
 
-	public void showSearchForCategory(String category)
+	public void deleteCategory(String categoryName)
 	{
-		searchTargetCategory = category;
-		searchMode = true;
-		searchBar.setText("");
-		searchBar.setVisible(true);
-		searchBar.requestFocusInWindow();
-		rebuild();
+		// Remove all items in this category
+		trackedItems.removeIf(item -> item.getCategory().equals(categoryName));
+
+		// Clear selected category if it's the one being deleted
+		if (categoryName.equals(selectedCategory))
+		{
+			selectedCategory = null;
+			searchBar.setEnabled(false);
+			searchBar.setToolTipText("Open a category to search for items");
+		}
+
+		plugin.saveTrackedItems(trackedItems);
+		rebuildTrackedItems();
 	}
 
-	private void closeSearch()
+	private void createNewCategory(String categoryName)
 	{
-		searchMode = false;
-		searchTargetCategory = null;
-		searchBar.setText("");
-		searchBar.setVisible(false);
+		if (categoryName == null || categoryName.trim().isEmpty())
+		{
+			return;
+		}
+
+		String trimmedCategoryName = categoryName.trim();
+
+		// Check if category already exists
+		boolean exists = trackedItems.stream()
+			.anyMatch(item -> item.getCategory().equalsIgnoreCase(trimmedCategoryName));
+
+		if (exists)
+		{
+			return; // Silently ignore duplicates
+		}
+
+		// Set as selected and focus search
+		selectedCategory = trimmedCategoryName;
+		searchBar.setEnabled(true);
+		searchBar.requestFocusInWindow();
+
+		// Force rebuild to show the empty category
 		rebuildTrackedItems();
 	}
 
@@ -250,39 +303,28 @@ public class ResourceTrackerPanel extends PluginPanel
 	{
 		String query = searchBar.getText().trim();
 
-		if (query.isEmpty() && searchMode)
+		if (query.isEmpty())
 		{
-			// If search was cleared, stay in search mode but show empty state
-			SwingUtil.fastRemoveAll(itemListPanel);
-			itemListPanel.setLayout(new BoxLayout(itemListPanel, BoxLayout.Y_AXIS));
-
-			JLabel hint = new JLabel("<html><center>Search for items to add to<br>" + (searchTargetCategory != null ? searchTargetCategory : "category") + "</center></html>");
-			hint.setForeground(Color.LIGHT_GRAY);
-			hint.setBorder(new EmptyBorder(20, 10, 20, 10));
-			hint.setAlignmentX(Component.CENTER_ALIGNMENT);
-			itemListPanel.add(hint);
-
-			JButton cancelButton = new JButton("Cancel");
-			cancelButton.setAlignmentX(Component.CENTER_ALIGNMENT);
-			cancelButton.addActionListener(e -> closeSearch());
-			itemListPanel.add(cancelButton);
-
-			itemListPanel.add(Box.createVerticalGlue());
-			itemListPanel.revalidate();
-			itemListPanel.repaint();
+			// Show tracked items
+			contentWrapper.removeAll();
+			contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+			contentWrapper.revalidate();
+			contentWrapper.repaint();
 		}
-		else if (!query.isEmpty())
+		else
 		{
+			// Show search results
+			contentWrapper.removeAll();
+			contentWrapper.add(searchScrollPane, BorderLayout.CENTER);
 			showSearchResults(query);
+			contentWrapper.revalidate();
+			contentWrapper.repaint();
 		}
 	}
 
 	private void showSearchResults(String query)
 	{
-		SwingUtil.fastRemoveAll(itemListPanel);
-
-		// Use vertical box layout for search results
-		itemListPanel.setLayout(new BoxLayout(itemListPanel, BoxLayout.Y_AXIS));
+		SwingUtil.fastRemoveAll(searchResultsPanel);
 
 		String lowerQuery = query.toLowerCase();
 
@@ -306,8 +348,8 @@ public class ResourceTrackerPanel extends PluginPanel
 		for (ItemDefinition item : results)
 		{
 			JPanel itemPanel = createSearchResultPanel(item);
-			itemListPanel.add(itemPanel);
-			itemListPanel.add(Box.createRigidArea(new Dimension(0, 2)));
+			searchResultsPanel.add(itemPanel);
+			searchResultsPanel.add(Box.createRigidArea(new Dimension(0, 2)));
 		}
 
 		if (results.isEmpty())
@@ -315,14 +357,14 @@ public class ResourceTrackerPanel extends PluginPanel
 			JLabel noResults = new JLabel("No items found");
 			noResults.setForeground(Color.LIGHT_GRAY);
 			noResults.setBorder(new EmptyBorder(10, 10, 10, 10));
-			itemListPanel.add(noResults);
+			searchResultsPanel.add(noResults);
 		}
 
 		// Add glue to push items to the top
-		itemListPanel.add(Box.createVerticalGlue());
+		searchResultsPanel.add(Box.createVerticalGlue());
 
-		itemListPanel.revalidate();
-		itemListPanel.repaint();
+		searchResultsPanel.revalidate();
+		searchResultsPanel.repaint();
 	}
 
 	private JPanel createSearchResultPanel(ItemDefinition itemDef)
@@ -373,11 +415,7 @@ public class ResourceTrackerPanel extends PluginPanel
 			String goalText = goalField.getText().trim();
 			if (goalText.isEmpty())
 			{
-				JOptionPane.showMessageDialog(panel,
-					"Please enter a goal amount.",
-					"Missing Goal",
-					JOptionPane.WARNING_MESSAGE);
-				return;
+				return; // Ignore empty input
 			}
 
 			try
@@ -385,11 +423,7 @@ public class ResourceTrackerPanel extends PluginPanel
 				int goal = Integer.parseInt(goalText);
 				if (goal <= 0)
 				{
-					JOptionPane.showMessageDialog(panel,
-						"Goal must be a positive number.",
-						"Invalid Goal",
-						JOptionPane.ERROR_MESSAGE);
-					return;
+					return; // Ignore invalid input
 				}
 
 				// Check if already tracked
@@ -397,38 +431,38 @@ public class ResourceTrackerPanel extends PluginPanel
 				{
 					if (existing.getItemId() == itemDef.getId())
 					{
-						JOptionPane.showMessageDialog(panel,
-							"This item is already being tracked!",
-							"Duplicate Item",
-							JOptionPane.WARNING_MESSAGE);
-						return;
+						return; // Ignore duplicates
 					}
 				}
 
-				// Use target category if set (from + button), otherwise ask
-				String category;
-				if (searchTargetCategory != null)
+				// Use selected category
+				if (selectedCategory == null || selectedCategory.isEmpty())
 				{
-					category = searchTargetCategory;
-				}
-				else
-				{
-					category = "Default";
+					return; // Should not happen since search is disabled without category
 				}
 
-				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, category);
-				addTrackedItem(newItem);
+				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
 
-				// Stay in search mode to add more items
+				// Add the item
+				trackedItems.add(newItem);
+				plugin.saveTrackedItems(trackedItems);
+
+				// Clear the goal field immediately
 				goalField.setText("");
-				goalField.requestFocusInWindow();
+
+				// Hide search and show updated categories
+				searchBar.setText("");
+				contentWrapper.removeAll();
+				contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+				contentWrapper.revalidate();
+				contentWrapper.repaint();
+
+				// Force rebuild
+				rebuildTrackedItems();
 			}
 			catch (NumberFormatException ex)
 			{
-				JOptionPane.showMessageDialog(panel,
-					"Please enter a valid number.",
-					"Invalid Input",
-					JOptionPane.ERROR_MESSAGE);
+				// Ignore invalid input
 			}
 		});
 
@@ -441,231 +475,62 @@ public class ResourceTrackerPanel extends PluginPanel
 	}
 
 
-	private void rebuild()
-	{
-		if (searchMode)
-		{
-			onSearchChanged();
-		}
-		else
-		{
-			rebuildTrackedItems();
-		}
-	}
-
 	private void rebuildTrackedItems()
 	{
-		SwingUtil.fastRemoveAll(itemListPanel);
-
-		if (trackedItems.isEmpty())
+		SwingUtilities.invokeLater(() ->
 		{
-			// Show error panel
-			errorPanel.setContent("Resource Tracker", "You have not tracked any items yet.<br>Click '+ New Category' to get started.");
-			if (errorPanel.getParent() == null)
+			SwingUtil.fastRemoveAll(itemListPanel);
+			categoryBoxes.clear();
+
+			// Ensure all items have a category (for backward compatibility)
+			trackedItems.forEach(item -> {
+				if (item.getCategory() == null || item.getCategory().isEmpty())
+				{
+					item.setCategory("Default");
+				}
+			});
+
+			// Group items by category
+			java.util.Map<String, List<TrackedItem>> itemsByCategory = trackedItems.stream()
+				.collect(Collectors.groupingBy(TrackedItem::getCategory));
+
+			// If we have a selected category but it's not in the map, add it as empty
+			if (selectedCategory != null && !itemsByCategory.containsKey(selectedCategory))
 			{
-				add(errorPanel);
+				itemsByCategory.put(selectedCategory, new ArrayList<>());
 			}
-			revalidate();
-			repaint();
-			return;
-		}
 
-		// Hide error panel when we have items
-		remove(errorPanel);
-
-		// Use vertical box layout for category boxes
-		itemListPanel.setLayout(new BoxLayout(itemListPanel, BoxLayout.Y_AXIS));
-
-		// Group items by category
-		java.util.Map<String, List<TrackedItem>> itemsByCategory = trackedItems.stream()
-			.collect(Collectors.groupingBy(TrackedItem::getCategory));
-
-		// Create a CategoryBox for each category
-		for (java.util.Map.Entry<String, List<TrackedItem>> entry : itemsByCategory.entrySet())
-		{
-			CategoryBox categoryBox = new CategoryBox(entry.getKey(), plugin, itemManager, this);
-			categoryBox.updateItems(entry.getValue());
-			categoryBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-			itemListPanel.add(categoryBox);
-			itemListPanel.add(Box.createRigidArea(new Dimension(0, 5)));
-		}
-
-		// Add glue to push everything to top
-		itemListPanel.add(Box.createVerticalGlue());
-
-		itemListPanel.revalidate();
-		itemListPanel.repaint();
-	}
-
-	private JPanel createTrackedItemBox(TrackedItem item)
-	{
-		// Main box with border layout
-		JPanel box = new JPanel(new BorderLayout());
-		box.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		box.setBorder(BorderFactory.createLineBorder(ColorScheme.DARK_GRAY_COLOR, 1));
-		box.setPreferredSize(new Dimension(42, 42));
-		box.setToolTipText(item.getItemName());
-
-		// Center panel for icon with text overlays
-		JPanel centerPanel = new JPanel(null); // Null layout for absolute positioning
-		centerPanel.setOpaque(false);
-		centerPanel.setPreferredSize(new Dimension(40, 38));
-
-		// Current amount (top-left corner) - add first so it's on top
-		JLabel currentLabel = new JLabel(String.valueOf(item.getCurrentAmount()));
-		currentLabel.setForeground(Color.YELLOW);
-		currentLabel.setFont(FontManager.getRunescapeSmallFont());
-		currentLabel.setBounds(1, -1, 38, 15);
-		centerPanel.add(currentLabel);
-
-		// Goal amount (bottom-right corner) - add second so it's on top
-		JLabel goalLabel = new JLabel(String.valueOf(item.getGoalAmount()));
-		goalLabel.setForeground(Color.WHITE);
-		goalLabel.setFont(FontManager.getRunescapeSmallFont());
-		goalLabel.setHorizontalAlignment(SwingConstants.RIGHT);
-		goalLabel.setBounds(0, 24, 40, 15);
-		centerPanel.add(goalLabel);
-
-		// Icon (centered) - add last so it's in the background
-		JLabel iconLabel = new JLabel();
-		AsyncBufferedImage itemImage = itemManager.getImage(item.getItemId());
-		itemImage.addTo(iconLabel);
-		iconLabel.setBounds(4, 3, 32, 32);
-		centerPanel.add(iconLabel);
-
-		box.add(centerPanel, BorderLayout.CENTER);
-
-		// Progress bar at bottom
-		JPanel progressBar = new JPanel()
-		{
-			@Override
-			protected void paintComponent(Graphics g)
+			// Create all CategoryBoxes first (like LootTracker buildBox pattern)
+			for (java.util.Map.Entry<String, List<TrackedItem>> entry : itemsByCategory.entrySet())
 			{
-				super.paintComponent(g);
-				int width = getWidth();
-				int height = getHeight();
+				CategoryBox categoryBox = new CategoryBox(entry.getKey(), plugin, itemManager, this);
+				categoryBoxes.add(categoryBox);
 
-				// Calculate progress percentage
-				float progress = Math.min(1.0f, (float) item.getCurrentAmount() / item.getGoalAmount());
+				// Build the box with its items
+				categoryBox.rebuild(entry.getValue());
 
-				// Determine color based on progress
-				Color barColor;
-				if (progress < 0.33f)
+				// Add to panel
+				itemListPanel.add(categoryBox);
+			}
+
+			// Now expand/collapse AFTER all boxes are added (avoids revalidation during build)
+			for (CategoryBox box : categoryBoxes)
+			{
+				if (box.getCategoryName().equals(selectedCategory))
 				{
-					barColor = new Color(200, 0, 0); // Red
-				}
-				else if (progress < 0.67f)
-				{
-					barColor = new Color(255, 165, 0); // Orange
-				}
-				else if (progress < 1.0f)
-				{
-					barColor = new Color(255, 200, 0); // Yellow
+					box.expand();
 				}
 				else
 				{
-					barColor = new Color(0, 200, 0); // Green
-				}
-
-				// Draw progress bar
-				int barWidth = (int) (width * progress);
-				g.setColor(barColor);
-				g.fillRect(0, 0, barWidth, height);
-			}
-		};
-		progressBar.setPreferredSize(new Dimension(42, 2));
-		progressBar.setOpaque(false);
-		box.add(progressBar, BorderLayout.SOUTH);
-
-		// Click handlers
-		MouseAdapter clickHandler = new MouseAdapter()
-		{
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				if (SwingUtilities.isRightMouseButton(e))
-				{
-					showContextMenu(e, item);
-				}
-				else if (e.getClickCount() == 2)
-				{
-					openEditDialog(item);
+					box.collapse();
 				}
 			}
 
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				box.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
-			}
-
-			@Override
-			public void mouseExited(MouseEvent e)
-			{
-				box.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-			}
-		};
-
-		box.addMouseListener(clickHandler);
-		centerPanel.addMouseListener(clickHandler);
-
-		return box;
+			// Single revalidate at the very end
+			itemListPanel.revalidate();
+		});
 	}
 
-	private void showContextMenu(MouseEvent e, TrackedItem item)
-	{
-		JPopupMenu menu = new JPopupMenu();
-		menu.setBorder(new EmptyBorder(5, 5, 5, 5));
-
-		JMenuItem editItem = new JMenuItem("Edit Goal");
-		editItem.addActionListener(ev -> openEditDialog(item));
-		menu.add(editItem);
-		
-		JMenuItem deleteItem = new JMenuItem("Remove");
-		deleteItem.addActionListener(ev -> removeTrackedItem(item));
-		menu.add(deleteItem);
-
-		menu.show(e.getComponent(), e.getX(), e.getY());
-	}
-
-
-	private void openEditDialog(TrackedItem item)
-	{
-		JTextField goalField = new JTextField(String.valueOf(item.getGoalAmount()), 10);
-
-		JPanel dialogPanel = new JPanel(new GridLayout(1, 2, 5, 5));
-		dialogPanel.add(new JLabel("New Goal Amount:"));
-		dialogPanel.add(goalField);
-
-		int result = JOptionPane.showConfirmDialog(
-			this,
-			dialogPanel,
-			"Edit Goal for " + item.getItemName(),
-			JOptionPane.OK_CANCEL_OPTION,
-			JOptionPane.PLAIN_MESSAGE
-		);
-
-		if (result == JOptionPane.OK_OPTION)
-		{
-			try
-			{
-				int newGoal = Integer.parseInt(goalField.getText());
-				if (newGoal <= 0)
-				{
-					JOptionPane.showMessageDialog(this, "Goal must be positive.", "Error", JOptionPane.ERROR_MESSAGE);
-					return;
-				}
-
-				item.setGoalAmount(newGoal);
-				plugin.saveTrackedItems(trackedItems);
-				rebuild();
-			}
-			catch (NumberFormatException ex)
-			{
-				JOptionPane.showMessageDialog(this, "Invalid number format.", "Error", JOptionPane.ERROR_MESSAGE);
-			}
-		}
-	}
 
 	private static class ItemDefinition
 	{
