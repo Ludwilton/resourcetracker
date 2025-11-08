@@ -23,6 +23,7 @@ import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
@@ -132,7 +133,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		categoryNameField.setPreferredSize(new Dimension(0, 30));
 		categoryNameField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		categoryNameField.setForeground(Color.GRAY);
-		categoryNameField.setText("New category name...");
+		categoryNameField.setText("Add category...");
 		categoryNameField.setCaretColor(Color.WHITE);
 
 		((AbstractDocument) categoryNameField.getDocument()).setDocumentFilter(new DocumentFilter() {
@@ -158,7 +159,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			@Override
 			public void focusGained(java.awt.event.FocusEvent e)
 			{
-				if (categoryNameField.getText().equals("New category name..."))
+				if (categoryNameField.getText().equals("Add category..."))
 				{
 					categoryNameField.setText("");
 					categoryNameField.setForeground(Color.WHITE);
@@ -170,7 +171,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			{
 				if (categoryNameField.getText().isEmpty())
 				{
-					categoryNameField.setText("New category name...");
+					categoryNameField.setText("Add category...");
 					categoryNameField.setForeground(Color.GRAY);
 				}
 			}
@@ -178,7 +179,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		categoryNameField.addActionListener(e ->
 		{
 			String categoryName = categoryNameField.getText().trim();
-			if (!categoryName.isEmpty() && !categoryName.equals("New category name..."))
+			if (!categoryName.isEmpty() && !categoryName.equals("Add category..."))
 			{
 				createNewCategory(categoryName);
 				categoryNameField.setText("New category name...");
@@ -195,7 +196,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		searchBar.setEnabled(true);
-		searchBar.setToolTipText("Create or select a category to add items");
+		searchBar.setToolTipText("Create/select a category to add items");
 		searchBar.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
@@ -270,6 +271,18 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
 		// Start with items panel visible
 		contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+
+		// Add keybinding for focusing the search bar
+		KeyStroke ctrlF = KeyStroke.getKeyStroke(KeyEvent.VK_F, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask());
+		getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ctrlF, "focusSearch");
+		getActionMap().put("focusSearch", new AbstractAction()
+		{
+			@Override
+			public void actionPerformed(ActionEvent e)
+			{
+				searchBar.requestFocusInWindow();
+			}
+		});
 	}
 
 	@Override
@@ -536,7 +549,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
 		if (categoryBoxes.isEmpty())
 		{
-			JLabel noCategory = new JLabel("Create a category to start tracking items");
+			JLabel noCategory = new JLabel("Create a category to tracking items");
 			noCategory.setForeground(Color.LIGHT_GRAY);
 			noCategory.setBorder(new EmptyBorder(10, 10, 10, 10));
 			searchResultsPanel.add(noCategory);
@@ -650,18 +663,22 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		addButton.setToolTipText("Add to tracking");
 		addButton.addActionListener(e -> {
 			String goalText = goalField.getText().trim();
-			if (goalText.isEmpty())
-			{
-				return; // Ignore empty input
-			}
+			Integer goal = null;
 
 			try
 			{
-				long goal = QuantityFormatter.parseQuantity(goalText);
-				if (goal <= 0 || goal > QuantityFormatter.getMaxStackSize())
+				if (!goalText.isEmpty())
 				{
-					JOptionPane.showMessageDialog(this, "Invalid goal amount.", "Error", JOptionPane.ERROR_MESSAGE);
-					return;
+					long parsedGoal = QuantityFormatter.parseQuantity(goalText);
+					if (parsedGoal > QuantityFormatter.getMaxStackSize())
+					{
+						parsedGoal = QuantityFormatter.getMaxStackSize();
+					}
+
+					if (parsedGoal > 0)
+					{
+						goal = (int) parsedGoal;
+					}
 				}
 
 				// Check if already tracked in the current category, if so, update it
@@ -669,7 +686,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 				{
 					if (existing.getItemId() == itemDef.getId() && existing.getCategory().equals(selectedCategory))
 					{
-						existing.setGoalAmount((int) goal);
+						existing.setGoalAmount(goal);
 						plugin.saveTrackedItems(trackedItems);
 						clearSearchAndRebuild();
 						return;
@@ -679,10 +696,10 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 				// If not tracked, add as a new item
 				if (selectedCategory == null || selectedCategory.isEmpty())
 				{
-					return; // Should not happen since search is disabled without category
+					return; // Should not happen
 				}
 
-				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), (int) goal, selectedCategory);
+				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
 				trackedItems.add(newItem);
 				plugin.saveTrackedItems(trackedItems);
 				clearSearchAndRebuild();

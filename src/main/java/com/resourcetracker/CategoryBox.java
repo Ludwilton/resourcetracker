@@ -214,12 +214,15 @@ public class CategoryBox extends JPanel
 		centerPanel.add(currentLabel);
 
 		// Goal amount (bottom-right, white)
-		JLabel goalLabel = new JLabel();
-		QuantityFormatter.formatLabel(goalLabel, item.getGoalAmount(), Color.WHITE, true);
-		goalLabel.setFont(FontManager.getRunescapeSmallFont());
-		goalLabel.setHorizontalAlignment(SwingConstants.RIGHT);
-		goalLabel.setBounds(0, 28, 40, 12);
-		centerPanel.add(goalLabel);
+		if (item.getGoalAmount() != null)
+		{
+			JLabel goalLabel = new JLabel();
+			QuantityFormatter.formatLabel(goalLabel, item.getGoalAmount(), Color.WHITE, true);
+			goalLabel.setFont(FontManager.getRunescapeSmallFont());
+			goalLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+			goalLabel.setBounds(0, 28, 40, 12);
+			centerPanel.add(goalLabel);
+		}
 
 		// Item icon (centered)
 		JLabel iconLabel = new JLabel();
@@ -234,24 +237,30 @@ public class CategoryBox extends JPanel
 		slotContainer.add(centerPanel, BorderLayout.CENTER);
 
 		// Progress bar at bottom
-		JPanel progressBar = new JPanel()
+		if (item.getGoalAmount() != null && item.getGoalAmount() > 0)
 		{
-			@Override
-			protected void paintComponent(Graphics g)
+			JPanel progressBar = new JPanel()
 			{
-				super.paintComponent(g);
-				float progress = Math.min(1.0f, (float) item.getCurrentAmount() / item.getGoalAmount());
-				Color barColor = progress < 0.33f ? new Color(200, 0, 0)
-					: progress < 0.67f ? new Color(255, 165, 0)
-					: progress < 1.0f ? new Color(255, 200, 0)
-					: new Color(0, 200, 0);
-				g.setColor(barColor);
-				g.fillRect(0, 0, (int) (getWidth() * progress), getHeight());
-			}
-		};
-		progressBar.setPreferredSize(new Dimension(40, 2));
-		progressBar.setOpaque(false);
-		slotContainer.add(progressBar, BorderLayout.SOUTH);
+				@Override
+				protected void paintComponent(Graphics g)
+				{
+					super.paintComponent(g);
+					if (item.getGoalAmount() != null && item.getGoalAmount() > 0)
+					{
+						float progress = Math.min(1.0f, (float) item.getCurrentAmount() / item.getGoalAmount());
+						Color barColor = progress < 0.33f ? new Color(200, 0, 0)
+							: progress < 0.67f ? new Color(255, 165, 0)
+							: progress < 1.0f ? new Color(255, 200, 0)
+							: new Color(0, 200, 0);
+						g.setColor(barColor);
+						g.fillRect(0, 0, (int) (getWidth() * progress), getHeight());
+					}
+				}
+			};
+			progressBar.setPreferredSize(new Dimension(40, 2));
+			progressBar.setOpaque(false);
+			slotContainer.add(progressBar, BorderLayout.SOUTH);
+		}
 
 		// Context menu
 		final JPopupMenu popupMenu = new JPopupMenu();
@@ -288,7 +297,7 @@ public class CategoryBox extends JPanel
 
 	private void openEditDialog(TrackedItem item)
 	{
-		JTextField goalField = new JTextField(String.valueOf(item.getGoalAmount()), 10);
+		JTextField goalField = new JTextField(item.getGoalAmount() != null ? String.valueOf(item.getGoalAmount()) : "", 10);
 		((AbstractDocument) goalField.getDocument()).setDocumentFilter(new ResourceTrackerPanel.QuantityDocumentFilter());
 
 		JPanel dialogPanel = new JPanel(new GridLayout(1, 2, 5, 5));
@@ -307,17 +316,25 @@ public class CategoryBox extends JPanel
 		{
 			try
 			{
-				long newGoal = QuantityFormatter.parseQuantity(goalField.getText());
-				if (newGoal > 0 && newGoal <= QuantityFormatter.getMaxStackSize())
+				String goalText = goalField.getText().trim();
+				Integer newGoal = null;
+				if (!goalText.isEmpty())
 				{
-					item.setGoalAmount((int) newGoal);
-					plugin.saveTrackedItems(parentPanel.getTrackedItems());
-					parentPanel.rebuild();
+					long parsedGoal = QuantityFormatter.parseQuantity(goalText);
+					if (parsedGoal > QuantityFormatter.getMaxStackSize())
+					{
+						parsedGoal = QuantityFormatter.getMaxStackSize();
+					}
+
+					if (parsedGoal > 0)
+					{
+						newGoal = (int) parsedGoal;
+					}
 				}
-				else
-				{
-					JOptionPane.showMessageDialog(this, "Invalid goal amount.", "Error", JOptionPane.ERROR_MESSAGE);
-				}
+
+				item.setGoalAmount(newGoal);
+				plugin.saveTrackedItems(parentPanel.getTrackedItems());
+				parentPanel.rebuild();
 			}
 			catch (NumberFormatException ex)
 			{
