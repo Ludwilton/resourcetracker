@@ -7,6 +7,7 @@ import net.runelite.client.util.AsyncBufferedImage;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.AbstractDocument;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
@@ -288,6 +289,7 @@ public class CategoryBox extends JPanel
 	private void openEditDialog(TrackedItem item)
 	{
 		JTextField goalField = new JTextField(String.valueOf(item.getGoalAmount()), 10);
+		((AbstractDocument) goalField.getDocument()).setDocumentFilter(new ResourceTrackerPanel.QuantityDocumentFilter());
 
 		JPanel dialogPanel = new JPanel(new GridLayout(1, 2, 5, 5));
 		dialogPanel.add(new JLabel("New Goal:"));

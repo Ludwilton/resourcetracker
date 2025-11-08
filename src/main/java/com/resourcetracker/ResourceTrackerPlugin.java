@@ -68,14 +68,7 @@ public class ResourceTrackerPlugin extends Plugin
 
 		panel = new ResourceTrackerPanel(this, itemManager);
 
-		// Create a simple default icon
-		final BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-		java.awt.Graphics2D g = icon.createGraphics();
-		g.setColor(java.awt.Color.GREEN);
-		g.fillRect(2, 2, 12, 12);
-		g.setColor(java.awt.Color.WHITE);
-		g.drawString("R", 4, 13);
-		g.dispose();
+		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/icon.png");
 
 		navButton = NavigationButton.builder()
 			.tooltip("Resource Tracker")
@@ -104,6 +97,11 @@ public class ResourceTrackerPlugin extends Plugin
 		{
 			// Load tracked items when player logs in
 			loadTrackedItems();
+		}
+		else if (event.getGameState() == GameState.LOGIN_SCREEN)
+		{
+			// Clear panel when logging out
+			panel.resetPanel();
 		}
 	}
 

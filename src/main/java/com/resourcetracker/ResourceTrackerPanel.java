@@ -13,6 +13,11 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.text.DocumentFilter;
 import java.awt.*;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
@@ -24,6 +29,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -48,6 +56,38 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		public String getName()
 		{
 			return name;
+		}
+	}
+// handles amount input like "100k", "2M"
+	static class QuantityDocumentFilter extends DocumentFilter {
+		private final Pattern pattern = Pattern.compile("\\d*[kKmMbB]?");
+
+		private boolean test(String text) {
+			return pattern.matcher(text).matches();
+		}
+
+		@Override
+		public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr) throws BadLocationException {
+			Document doc = fb.getDocument();
+			StringBuilder sb = new StringBuilder();
+			sb.append(doc.getText(0, doc.getLength()));
+			sb.insert(offset, string);
+
+			if (test(sb.toString())) {
+				super.insertString(fb, offset, string, attr);
+			}
+		}
+
+		@Override
+		public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs) throws BadLocationException {
+			Document doc = fb.getDocument();
+			StringBuilder sb = new StringBuilder();
+			sb.append(doc.getText(0, doc.getLength()));
+			sb.replace(offset, offset + length, text);
+
+			if (test(sb.toString())) {
+				super.replace(fb, offset, length, text, attrs);
+			}
 		}
 	}
 
@@ -94,6 +134,25 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		categoryNameField.setForeground(Color.GRAY);
 		categoryNameField.setText("New category name...");
 		categoryNameField.setCaretColor(Color.WHITE);
+
+		((AbstractDocument) categoryNameField.getDocument()).setDocumentFilter(new DocumentFilter() {
+			private static final int MAX_LENGTH = 30;
+
+			@Override
+			public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr) throws BadLocationException {
+				if ((fb.getDocument().getLength() + string.length()) <= MAX_LENGTH) {
+					super.insertString(fb, offset, string, attr);
+				}
+			}
+
+			@Override
+			public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs) throws BadLocationException {
+				if ((fb.getDocument().getLength() + (text != null ? text.length() : 0) - length) <= MAX_LENGTH) {
+					super.replace(fb, offset, length, text, attrs);
+				}
+			}
+		});
+
 		categoryNameField.addFocusListener(new java.awt.event.FocusAdapter()
 		{
 			@Override
@@ -135,8 +194,8 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		searchBar.setPreferredSize(new Dimension(0, 30));
 		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-		searchBar.setEnabled(false); // Disabled by default
-		searchBar.setToolTipText("Open a category to search for items");
+		searchBar.setEnabled(true);
+		searchBar.setToolTipText("Create or select a category to add items");
 		searchBar.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
@@ -286,6 +345,15 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		rebuildTrackedItems();
 	}
 
+	public void resetPanel()
+	{
+		trackedItems.clear();
+		selectedCategory = null;
+		searchBar.setEnabled(true);
+		searchBar.setToolTipText("Create or select a category to add items");
+		rebuildTrackedItems();
+	}
+
 	public void rebuild()
 	{
 		rebuildTrackedItems();
@@ -318,8 +386,8 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		if (categoryName.equals(selectedCategory))
 		{
 			selectedCategory = null;
-			searchBar.setEnabled(false);
-			searchBar.setToolTipText("Open a category to search for items");
+			searchBar.setEnabled(true);
+			searchBar.setToolTipText("Create or select a category to add items");
 		}
 
 		plugin.saveTrackedItems(trackedItems);
@@ -380,8 +448,8 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			for (TrackedItem importedItem : importedItems)
 			{
 				importedItem.setCategory(targetCategory);
-				// Remove existing item if present
-				trackedItems.removeIf(existing -> existing.getItemId() == importedItem.getItemId());
+				// Remove existing item if present in the same category
+				trackedItems.removeIf(existing -> existing.getItemId() == importedItem.getItemId() && existing.getCategory().equals(targetCategory));
 				trackedItems.add(importedItem);
 			}
 
@@ -466,6 +534,17 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 	{
 		SwingUtil.fastRemoveAll(searchResultsPanel);
 
+		if (categoryBoxes.isEmpty())
+		{
+			JLabel noCategory = new JLabel("Create a category to start tracking items");
+			noCategory.setForeground(Color.LIGHT_GRAY);
+			noCategory.setBorder(new EmptyBorder(10, 10, 10, 10));
+			searchResultsPanel.add(noCategory);
+			searchResultsPanel.revalidate();
+			searchResultsPanel.repaint();
+			return;
+		}
+
 		String lowerQuery = query.toLowerCase();
 
 		// Use ItemManager to search for items
@@ -545,9 +624,25 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		goalField.setForeground(Color.WHITE);
 		goalField.setCaretColor(Color.WHITE);
 		goalField.setToolTipText("Enter goal amount");
+		((AbstractDocument) goalField.getDocument()).setDocumentFilter(new QuantityDocumentFilter());
 
 		JButton addButton = new JButton("+");
 		goalField.addActionListener(e -> addButton.doClick());
+
+		if (selectedCategory == null)
+		{
+			goalField.setEnabled(false);
+			addButton.setEnabled(false);
+			goalField.setToolTipText("Select a category to add an item");
+			addButton.setToolTipText("Select a category to add an item");
+		}
+		else
+		{
+			goalField.setEnabled(true);
+			addButton.setEnabled(true);
+			goalField.setToolTipText("Enter goal amount");
+			addButton.setToolTipText("Add to tracking");
+		}
 
 		addButton.setPreferredSize(new Dimension(35, 25));
 		addButton.setMinimumSize(new Dimension(35, 25));
@@ -569,10 +664,10 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 					return;
 				}
 
-				// Check if already tracked, if so, update it
+				// Check if already tracked in the current category, if so, update it
 				for (TrackedItem existing : trackedItems)
 				{
-					if (existing.getItemId() == itemDef.getId())
+					if (existing.getItemId() == itemDef.getId() && existing.getCategory().equals(selectedCategory))
 					{
 						existing.setGoalAmount((int) goal);
 						plugin.saveTrackedItems(trackedItems);
@@ -637,20 +732,28 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			java.util.Map<String, List<TrackedItem>> itemsByCategory = trackedItems.stream()
 				.collect(Collectors.groupingBy(TrackedItem::getCategory));
 
-			// If we have a selected category but it's not in the map, add it as empty
-			if (selectedCategory != null && !itemsByCategory.containsKey(selectedCategory))
+			// Use a LinkedHashSet to preserve insertion order
+			java.util.Set<String> categoryNames = new java.util.LinkedHashSet<>();
+			for (TrackedItem item : trackedItems)
 			{
-				itemsByCategory.put(selectedCategory, new ArrayList<>());
+				categoryNames.add(item.getCategory());
+			}
+
+			// Add the currently selected (potentially new and empty) category to the end
+			if (selectedCategory != null && !selectedCategory.isEmpty())
+			{
+				categoryNames.add(selectedCategory);
 			}
 
 			// Create all CategoryBoxes first (like LootTracker buildBox pattern)
-			for (java.util.Map.Entry<String, List<TrackedItem>> entry : itemsByCategory.entrySet())
+			for (String categoryName : categoryNames)
 			{
-				CategoryBox categoryBox = new CategoryBox(entry.getKey(), plugin, itemManager, this);
+				List<TrackedItem> itemsForCategory = itemsByCategory.getOrDefault(categoryName, new ArrayList<>());
+				CategoryBox categoryBox = new CategoryBox(categoryName, plugin, itemManager, this);
 				categoryBoxes.add(categoryBox);
 
 				// Build the box with its items
-				categoryBox.rebuild(entry.getValue());
+				categoryBox.rebuild(itemsForCategory);
 
 				// Add to panel
 				itemListPanel.add(categoryBox);
