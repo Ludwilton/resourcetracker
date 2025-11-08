@@ -14,6 +14,8 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -130,6 +132,20 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		});
 		searchBar.addClearListener(this::onSearchChanged);
 
+		// Add key listener for Esc key
+		searchBar.addKeyListener(new KeyAdapter()
+		{
+			@Override
+			public void keyPressed(KeyEvent e)
+			{
+				if (e.getKeyCode() == KeyEvent.VK_ESCAPE)
+				{
+					searchBar.setText("");
+					onSearchChanged();
+				}
+			}
+		});
+
 		searchAreaPanel.add(Box.createRigidArea(new Dimension(0, 5)));
 		searchAreaPanel.add(searchBar);
 
@@ -155,7 +171,12 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		itemListPanel.setLayout(new BoxLayout(itemListPanel, BoxLayout.Y_AXIS));
 		itemListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		itemScrollPane = new JScrollPane(itemListPanel);
+		JPanel itemPanelWrapper = new JPanel(new BorderLayout());
+		itemPanelWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		itemPanelWrapper.add(itemListPanel, BorderLayout.NORTH);
+
+
+		itemScrollPane = new JScrollPane(itemPanelWrapper);
 		itemScrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		itemScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		itemScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -209,22 +230,21 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		rebuildTrackedItems();
 	}
 
-	public void updateItemAmount(int itemId, int amount)
+	public boolean updateItemAmount(int itemId, int amount)
 	{
-		boolean updated = false;
 		for (TrackedItem item : trackedItems)
 		{
 			if (item.getItemId() == itemId)
 			{
-				item.setCurrentAmount(amount);
-				updated = true;
+				if (item.getCurrentAmount() != amount)
+				{
+					item.setCurrentAmount(amount);
+					return true;
+				}
+				return false;
 			}
 		}
-		if (updated)
-		{
-			plugin.saveTrackedItems(trackedItems);
-			rebuildTrackedItems();
-		}
+		return false;
 	}
 
 	public List<TrackedItem> getTrackedItems()

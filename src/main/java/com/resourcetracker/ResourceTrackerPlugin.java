@@ -59,7 +59,7 @@ public class ResourceTrackerPlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
-		log.debug("Resource Tracker started!");
+		log.debug("Resource Tracker started");
 
 		panel = new ResourceTrackerPanel(this, itemManager);
 
@@ -118,7 +118,6 @@ public class ResourceTrackerPlugin extends Plugin
 			return;
 		}
 
-		// Create a map of item ID to total quantity
 		Map<Integer, Integer> bankItems = new HashMap<>();
 		for (Item item : itemContainer.getItems())
 		{
@@ -128,11 +127,20 @@ public class ResourceTrackerPlugin extends Plugin
 			}
 		}
 
-		// Update tracked items with bank quantities
+		boolean needsUpdate = false;
 		for (TrackedItem trackedItem : panel.getTrackedItems())
 		{
 			int amount = bankItems.getOrDefault(trackedItem.getItemId(), 0);
-			panel.updateItemAmount(trackedItem.getItemId(), amount);
+			if (panel.updateItemAmount(trackedItem.getItemId(), amount))
+			{
+				needsUpdate = true;
+			}
+		}
+
+		if (needsUpdate)
+		{
+			saveTrackedItems(panel.getTrackedItems());
+			panel.rebuild();
 		}
 	}
 
