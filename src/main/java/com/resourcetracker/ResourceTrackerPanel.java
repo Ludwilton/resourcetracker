@@ -48,11 +48,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 		setLayout(new BorderLayout());
 
-		// Create main layout panel
-		final JPanel layoutPanel = new JPanel();
-		layoutPanel.setLayout(new BoxLayout(layoutPanel, BoxLayout.Y_AXIS));
-		add(layoutPanel, BorderLayout.NORTH);
-
 		// Search area - always visible at top
 		JPanel searchAreaPanel = new JPanel();
 		searchAreaPanel.setLayout(new BoxLayout(searchAreaPanel, BoxLayout.Y_AXIS));
@@ -61,6 +56,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARK_GRAY_COLOR.darker()),
 			new EmptyBorder(5, 5, 5, 5)
 		));
+		add(searchAreaPanel, BorderLayout.NORTH);
 
 		// Category name input field
 		JTextField categoryNameField = new JTextField();
@@ -138,12 +134,10 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		searchAreaPanel.add(searchBar);
 
 
-		layoutPanel.add(searchAreaPanel);
-
 		// Wrapper panel for content (search results OR tracked items)
 		contentWrapper = new JPanel(new BorderLayout());
 		contentWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		layoutPanel.add(contentWrapper);
+		add(contentWrapper, BorderLayout.CENTER);
 
 		// Search results panel - shown when searching
 		searchResultsPanel = new JPanel();
@@ -437,6 +431,8 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 		goalField.setToolTipText("Enter goal amount");
 
 		JButton addButton = new JButton("+");
+		goalField.addActionListener(e -> addButton.doClick());
+
 		addButton.setPreferredSize(new Dimension(35, 25));
 		addButton.setMinimumSize(new Dimension(35, 25));
 		addButton.setMaximumSize(new Dimension(35, 25));
@@ -450,10 +446,11 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
 			try
 			{
-				int goal = Integer.parseInt(goalText);
-				if (goal <= 0)
+				long goal = QuantityFormatter.parseQuantity(goalText);
+				if (goal <= 0 || goal > QuantityFormatter.getMaxStackSize())
 				{
-					return; // Ignore invalid input
+					JOptionPane.showMessageDialog(this, "Invalid goal amount.", "Error", JOptionPane.ERROR_MESSAGE);
+					return;
 				}
 
 				// Check if already tracked
@@ -471,7 +468,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 					return; // Should not happen since search is disabled without category
 				}
 
-				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
+				TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), (int) goal, selectedCategory);
 
 				// Add the item
 				trackedItems.add(newItem);
@@ -492,7 +489,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 			}
 			catch (NumberFormatException ex)
 			{
-				// Ignore invalid input
+				JOptionPane.showMessageDialog(this, "Please enter a valid number.", "Error", JOptionPane.ERROR_MESSAGE);
 			}
 		});
 

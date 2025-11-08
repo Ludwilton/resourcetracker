@@ -195,15 +195,15 @@ public class CategoryBox extends JPanel
 		centerPanel.setPreferredSize(new Dimension(40, 40));
 
 		// Current amount (top-left, yellow)
-		JLabel currentLabel = new JLabel(String.valueOf(item.getCurrentAmount()));
-		currentLabel.setForeground(Color.YELLOW);
+		JLabel currentLabel = new JLabel();
+		QuantityFormatter.formatLabel(currentLabel, item.getCurrentAmount(), Color.YELLOW, false);
 		currentLabel.setFont(FontManager.getRunescapeSmallFont());
 		currentLabel.setBounds(1, 0, 38, 12);
 		centerPanel.add(currentLabel);
 
 		// Goal amount (bottom-right, white)
-		JLabel goalLabel = new JLabel(String.valueOf(item.getGoalAmount()));
-		goalLabel.setForeground(Color.WHITE);
+		JLabel goalLabel = new JLabel();
+		QuantityFormatter.formatLabel(goalLabel, item.getGoalAmount(), Color.WHITE, true);
 		goalLabel.setFont(FontManager.getRunescapeSmallFont());
 		goalLabel.setHorizontalAlignment(SwingConstants.RIGHT);
 		goalLabel.setBounds(0, 28, 40, 12);
@@ -277,17 +277,21 @@ public class CategoryBox extends JPanel
 		{
 			try
 			{
-				int newGoal = Integer.parseInt(goalField.getText());
-				if (newGoal > 0)
+				long newGoal = QuantityFormatter.parseQuantity(goalField.getText());
+				if (newGoal > 0 && newGoal <= QuantityFormatter.getMaxStackSize())
 				{
-					item.setGoalAmount(newGoal);
+					item.setGoalAmount((int) newGoal);
 					plugin.saveTrackedItems(parentPanel.getTrackedItems());
 					parentPanel.rebuild();
+				}
+				else
+				{
+					JOptionPane.showMessageDialog(this, "Invalid goal amount.", "Error", JOptionPane.ERROR_MESSAGE);
 				}
 			}
 			catch (NumberFormatException ex)
 			{
-				// Ignore invalid input
+				JOptionPane.showMessageDialog(this, "Please enter a valid number.", "Error", JOptionPane.ERROR_MESSAGE);
 			}
 		}
 	}
