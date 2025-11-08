@@ -36,4 +36,4 @@ Items are organized into custom categories, and the plugin automatically updates
 
 ### Support & Suggestions
 
-If you have suggestions, want to contribute or need support, feel free to join the Discord server [here.](https://discord.gg/yRXfDgANBt)
+If you have suggestions, want to contribute or need support, feel free to join the Discord server [here.](https://discord.gg/dhCrh4whQW)
