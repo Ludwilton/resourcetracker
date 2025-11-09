@@ -99,9 +99,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     private final JScrollPane searchScrollPane;
     private final JScrollPane itemScrollPane;
     private final IconTextField searchBar;
-    // CHANGED: Promoted to class field to be accessible by resetPanel
     private final JTextField categoryNameField;
-    // CHANGED: Swapped ArrayList for a thread-safe list to prevent crashes
     private final List<TrackedItem> trackedItems = new CopyOnWriteArrayList<>();
     private final List<CategoryBox> categoryBoxes = new ArrayList<>();
     private String selectedCategory = null;
@@ -113,7 +111,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         super(false);
         this.plugin = plugin;
         this.itemManager = itemManager;
-        // CHANGED: Initialization of trackedItems moved to declaration
 
         setBorder(new EmptyBorder(6, 6, 6, 6));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -130,7 +127,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         add(searchAreaPanel, BorderLayout.NORTH);
 
         // Category name input field
-        // CHANGED: Initialized class field instead of local variable
         categoryNameField = new JTextField();
         categoryNameField.setPreferredSize(new Dimension(0, 30));
         categoryNameField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -184,7 +180,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             if (!categoryName.isEmpty() && !categoryName.equals("Add category..."))
             {
                 createNewCategory(categoryName);
-                // This line is already correct from your previous edit
                 categoryNameField.setText("Add category...");
                 categoryNameField.setForeground(Color.GRAY);
             }
@@ -272,7 +267,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         itemScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         itemScrollPane.setBorder(null);
 
-        // Start with items panel visible
+
         contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
 
         // Add keybinding for focusing the search bar
@@ -513,7 +508,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     private void scheduleSearch()
     {
-        // Cancel any pending search
         if (searchDebounceTimer != null)
         {
             searchDebounceTimer.stop();
@@ -727,7 +721,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     private void clearSearchAndRebuild()
     {
-        // Clear the goal field immediately
         searchBar.setText("");
         contentWrapper.removeAll();
         contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
@@ -783,7 +776,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 itemListPanel.add(categoryBox);
             }
 
-            // Now expand/collapse AFTER all boxes are added (avoids revalidation during build)
             for (CategoryBox box : categoryBoxes)
             {
                 if (box.getCategoryName().equals(selectedCategory))
@@ -796,7 +788,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }
             }
 
-            // Single revalidate at the very end
             itemListPanel.revalidate();
         });
     }

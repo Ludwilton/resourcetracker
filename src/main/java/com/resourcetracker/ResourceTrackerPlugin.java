@@ -74,7 +74,6 @@ public class ResourceTrackerPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 		eventBus.register(this);
 
-		// Load items immediately - RSProfile is available on startup
 		loadTrackedItems();
 	}
 
