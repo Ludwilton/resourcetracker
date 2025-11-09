@@ -7,7 +7,7 @@ import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.SwingUtil;
-
+import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
@@ -92,6 +92,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     private final ResourceTrackerPlugin plugin;
     private final ItemManager itemManager;
+    private final ChatboxPanelManager chatboxPanelManager;
 
     private final JPanel itemListPanel;
     private final JPanel searchResultsPanel;
@@ -106,11 +107,12 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     private static final int MAX_SEARCH_RESULTS = 30;
     private Timer searchDebounceTimer;
 
-    public ResourceTrackerPanel(ResourceTrackerPlugin plugin, ItemManager itemManager)
+    public ResourceTrackerPanel(ResourceTrackerPlugin plugin, ItemManager itemManager, ChatboxPanelManager chatboxPanelManager)
     {
         super(false);
         this.plugin = plugin;
         this.itemManager = itemManager;
+        this.chatboxPanelManager = chatboxPanelManager;
 
         setBorder(new EmptyBorder(6, 6, 6, 6));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -428,55 +430,75 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void importCategoryFromClipboard(String targetCategory)
     {
+        final String clipboardText;
         try
         {
-            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-            if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor))
-            {
-                String json = (String) clipboard.getData(DataFlavor.stringFlavor);
-                importCategory(json, targetCategory);
-            }
-            else
-            {
-                JOptionPane.showMessageDialog(this, "No text found on clipboard.", "Import Error", JOptionPane.ERROR_MESSAGE);
-            }
+            clipboardText = Toolkit.getDefaultToolkit()
+                .getSystemClipboard()
+                .getData(DataFlavor.stringFlavor)
+                .toString();
         }
-        catch (UnsupportedFlavorException | IOException e)
+        catch (IOException | UnsupportedFlavorException ex)
         {
-            log.warn("Failed to read from clipboard", e);
-            JOptionPane.showMessageDialog(this, "Could not read from clipboard.", "Import Error", JOptionPane.ERROR_MESSAGE);
+            log.warn("Error reading clipboard", ex);
+            plugin.sendChatMessage("Unable to read system clipboard.");
+            return;
         }
-    }
 
-    public void importCategory(String json, String targetCategory)
-    {
+        if (clipboardText == null || clipboardText.isEmpty())
+        {
+            plugin.sendChatMessage("You do not have any items copied in your clipboard.");
+            return;
+        }
+
+        List<TrackedItem> importItems;
         try
         {
             java.lang.reflect.Type listType = new com.google.gson.reflect.TypeToken<ArrayList<TrackedItem>>(){}.getType();
-            List<TrackedItem> importedItems = plugin.getGson().fromJson(json, listType);
+            importItems = plugin.getGson().fromJson(clipboardText, listType);
+        }
+        catch (com.google.gson.JsonSyntaxException | IllegalStateException e)
+        {
+            plugin.sendChatMessage("You do not have any valid categories copied in your clipboard.");
+            return;
+        }
 
-            if (importedItems == null || importedItems.isEmpty())
-            {
-                return;
-            }
+        if (importItems == null || importItems.isEmpty())
+        {
+            plugin.sendChatMessage("You do not have any valid categories copied in your clipboard.");
+            return;
+        }
 
-            // Update category and add to list
-            for (TrackedItem importedItem : importedItems)
+        plugin.getClientUi().requestFocus();
+
+        chatboxPanelManager.openTextMenuInput("Are you sure you want to import " + importItems.size() + " items into '" + targetCategory + "'?")
+                .option("Yes", () ->
+                {
+                    importCategory(importItems, targetCategory);
+                    plugin.sendChatMessage(importItems.size() + " items were imported to " + targetCategory + ".");
+                })
+                .option("No", () -> {})
+                .build();
+    }
+
+    public void importCategory(List<TrackedItem> importedItems, String targetCategory)
+    {
+        // Update category and add to list
+        for (TrackedItem importedItem : importedItems)
+        {
+            if (importedItem != null && importedItem.getItemId() > 0 && importedItem.getItemName() != null)
             {
                 importedItem.setCategory(targetCategory);
-                // Remove existing item if present in the same category
+                // Reset current amount, as it's based on bank state
+                importedItem.setCurrentAmount(0);
+                // Remove existing item if present in the same category before adding the new one
                 trackedItems.removeIf(existing -> existing.getItemId() == importedItem.getItemId() && existing.getCategory().equals(targetCategory));
                 trackedItems.add(importedItem);
             }
+        }
 
-            plugin.saveTrackedItems(trackedItems);
-            rebuildTrackedItems();
-        }
-        catch (Exception e)
-        {
-            log.error("Failed to import category data", e);
-            JOptionPane.showMessageDialog(this, "Invalid data format.", "Import Error", JOptionPane.ERROR_MESSAGE);
-        }
+        plugin.saveTrackedItems(trackedItems);
+        rebuildTrackedItems();
     }
 
     private void createNewCategory(String categoryName)
@@ -707,7 +729,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             }
             catch (NumberFormatException ex)
             {
-                JOptionPane.showMessageDialog(this, "Please enter a valid number.", "Error", JOptionPane.ERROR_MESSAGE);
+                plugin.sendChatMessage("Please enter a valid number.");
             }
         });
 
@@ -766,7 +788,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             for (String categoryName : categoryNames)
             {
                 List<TrackedItem> itemsForCategory = itemsByCategory.getOrDefault(categoryName, new ArrayList<>());
-                CategoryBox categoryBox = new CategoryBox(categoryName, plugin, itemManager, this);
+                CategoryBox categoryBox = new CategoryBox(categoryName, plugin, itemManager, this, chatboxPanelManager);
                 categoryBoxes.add(categoryBox);
 
                 // Build the box with its items
@@ -792,3 +814,4 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         });
     }
 }
+

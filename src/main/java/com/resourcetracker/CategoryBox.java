@@ -1,17 +1,19 @@
 package com.resourcetracker;
 
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.util.AsyncBufferedImage;
 
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.text.AbstractDocument;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class CategoryBox extends JPanel
 {
@@ -21,18 +23,19 @@ public class CategoryBox extends JPanel
 	private final ResourceTrackerPlugin plugin;
 	private final ItemManager itemManager;
 	private final ResourceTrackerPanel parentPanel;
+	private final ChatboxPanelManager chatboxPanelManager;
 	private final JPanel itemContainer = new JPanel();
 	private final JPanel headerPanel = new JPanel();
-	private final JLabel titleLabel = new JLabel();
 
 	private List<TrackedItem> items;
 
-	public CategoryBox(String categoryName, ResourceTrackerPlugin plugin, ItemManager itemManager, ResourceTrackerPanel parentPanel)
+	public CategoryBox(String categoryName, ResourceTrackerPlugin plugin, ItemManager itemManager, ResourceTrackerPanel parentPanel, ChatboxPanelManager chatboxPanelManager)
 	{
 		this.categoryName = categoryName;
 		this.plugin = plugin;
 		this.itemManager = itemManager;
 		this.parentPanel = parentPanel;
+		this.chatboxPanelManager = chatboxPanelManager;
 
 		setLayout(new BorderLayout(0, 1));
 		setBorder(new EmptyBorder(5, 0, 0, 0));
@@ -42,6 +45,7 @@ public class CategoryBox extends JPanel
 		headerPanel.setBorder(new EmptyBorder(7, 7, 7, 7));
 		headerPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR.darker());
 
+		JLabel titleLabel = new JLabel();
 		titleLabel.setText(categoryName);
 		titleLabel.setFont(FontManager.getRunescapeSmallFont());
 		titleLabel.setForeground(Color.WHITE);
@@ -87,17 +91,11 @@ public class CategoryBox extends JPanel
 
 		JMenuItem deleteCategory = new JMenuItem("Delete Category");
 		deleteCategory.addActionListener(e -> {
-			int result = JOptionPane.showConfirmDialog(
-				this,
-				"Delete category '" + categoryName + "' and all its items?",
-				"Delete Category",
-				JOptionPane.YES_NO_OPTION,
-				JOptionPane.WARNING_MESSAGE
-			);
-			if (result == JOptionPane.YES_OPTION)
-			{
-				parentPanel.deleteCategory(categoryName);
-			}
+			plugin.getClientUi().requestFocus();
+			chatboxPanelManager.openTextMenuInput("Delete category '" + categoryName + "' and all its items?")
+				.option("Yes", () -> parentPanel.deleteCategory(categoryName))
+				.option("No", () -> {})
+				.build();
 		});
 		categoryPopup.add(deleteCategory);
 
@@ -296,49 +294,36 @@ public class CategoryBox extends JPanel
 
 	private void openEditDialog(TrackedItem item)
 	{
-		JTextField goalField = new JTextField(item.getGoalAmount() != null ? String.valueOf(item.getGoalAmount()) : "", 10);
-		((AbstractDocument) goalField.getDocument()).setDocumentFilter(new ResourceTrackerPanel.QuantityDocumentFilter());
-
-		JPanel dialogPanel = new JPanel(new GridLayout(1, 2, 5, 5));
-		dialogPanel.add(new JLabel("New Goal:"));
-		dialogPanel.add(goalField);
-
-		int result = JOptionPane.showConfirmDialog(
-			this,
-			dialogPanel,
-			item.getItemName(),
-			JOptionPane.OK_CANCEL_OPTION,
-			JOptionPane.PLAIN_MESSAGE
-		);
-
-		if (result == JOptionPane.OK_OPTION)
-		{
-			try
-			{
-				String goalText = goalField.getText().trim();
-				Integer newGoal = null;
-				if (!goalText.isEmpty())
-				{
-					long parsedGoal = QuantityFormatter.parseQuantity(goalText);
-					if (parsedGoal > QuantityFormatter.getMaxStackSize())
+		chatboxPanelManager.openTextInput("Enter new goal for " + item.getItemName() + ":")
+			.onDone((Consumer<String>) (input) -> {
+				SwingUtilities.invokeLater(() -> {
+					try
 					{
-						parsedGoal = QuantityFormatter.getMaxStackSize();
-					}
+						Integer newGoal = null;
+						if (input != null && !input.trim().isEmpty())
+						{
+							long parsedGoal = QuantityFormatter.parseQuantity(input.trim());
+							if (parsedGoal > QuantityFormatter.getMaxStackSize())
+							{
+								parsedGoal = QuantityFormatter.getMaxStackSize();
+							}
 
-					if (parsedGoal > 0)
+							if (parsedGoal > 0)
+							{
+								newGoal = (int) parsedGoal;
+							}
+						}
+
+						item.setGoalAmount(newGoal);
+						plugin.saveTrackedItems(parentPanel.getTrackedItems());
+						parentPanel.rebuild();
+					}
+					catch (NumberFormatException ex)
 					{
-						newGoal = (int) parsedGoal;
+						plugin.sendChatMessage("Please enter a valid number.");
 					}
-				}
-
-				item.setGoalAmount(newGoal);
-				plugin.saveTrackedItems(parentPanel.getTrackedItems());
-				parentPanel.rebuild();
-			}
-			catch (NumberFormatException ex)
-			{
-				JOptionPane.showMessageDialog(this, "Please enter a valid number.", "Error", JOptionPane.ERROR_MESSAGE);
-			}
-		}
+				});
+			})
+			.build();
 	}
 }
