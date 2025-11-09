@@ -6,7 +6,7 @@ The Resource Tracker is a [RuneLite](https://runelite.net/) plugin that allows y
 
 Items are organized into custom categories, and the plugin automatically updates the current amount of each tracked item based on the contents of your bank.
 
-![plugindemo](./img/plugindemo.mp4)
+![plugindemo](./img/plugindemo.webp)
 
 ## Features
 
