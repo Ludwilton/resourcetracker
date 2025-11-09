@@ -50,10 +50,12 @@ public class ResourceTrackerPlugin extends Plugin
 	@Inject
 	private EventBus eventBus;
 
+	@Inject
+	@Getter
+	private Gson gson;
+
 	private ResourceTrackerPanel panel;
 	private NavigationButton navButton;
-	@Getter
-	private final Gson gson = new Gson();
 
 	@Override
 	protected void startUp()
