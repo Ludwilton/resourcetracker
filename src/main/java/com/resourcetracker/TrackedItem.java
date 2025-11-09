@@ -11,11 +11,7 @@ public class TrackedItem
 	private Integer goalAmount;
 	private String category = "Default";
 
-	@SuppressWarnings("unused")
-	public TrackedItem()
-	{
-		// Default constructor for Gson
-	}
+
 
 	public TrackedItem(int itemId, String itemName, Integer goalAmount, String category)
 	{
@@ -26,21 +22,4 @@ public class TrackedItem
 		this.category = category;
 	}
 
-	public int getRemaining()
-	{
-		if (goalAmount == null)
-		{
-			return 0;
-		}
-		return Math.max(0, goalAmount - currentAmount);
-	}
-
-	public boolean isComplete()
-	{
-		if (goalAmount == null)
-		{
-			return false;
-		}
-		return currentAmount >= goalAmount;
-	}
 }

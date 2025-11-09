@@ -347,15 +347,17 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void resetPanel()
     {
-        trackedItems.clear();
-        selectedCategory = null;
-        searchBar.setEnabled(true);
-        searchBar.setToolTipText("Create or select a category to add items");
+        SwingUtilities.invokeLater(() -> {
+            trackedItems.clear();
+            selectedCategory = null;
+            searchBar.setEnabled(true);
+            searchBar.setToolTipText("Create or select a category to add items");
 
-        categoryNameField.setText("Add category...");
-        categoryNameField.setForeground(Color.GRAY);
+            categoryNameField.setText("Add category...");
+            categoryNameField.setForeground(Color.GRAY);
 
-        rebuildTrackedItems();
+            rebuildTrackedItems();
+        });
     }
 
     public void rebuild()
@@ -409,7 +411,22 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             return;
         }
 
-        String json = plugin.getGson().toJson(categoryItems);
+        // Create a new list of items with amounts reset to 0 for export
+        List<TrackedItem> itemsForExport = new ArrayList<>();
+        for (TrackedItem originalItem : categoryItems)
+        {
+            TrackedItem exportItem = new TrackedItem(
+                originalItem.getItemId(),
+                originalItem.getItemName(),
+                originalItem.getGoalAmount(),
+                originalItem.getCategory()
+            );
+            // The constructor already sets currentAmount to 0, but this is explicit
+            exportItem.setCurrentAmount(0);
+            itemsForExport.add(exportItem);
+        }
+
+        String json = plugin.getGson().toJson(itemsForExport);
         final StringSelection stringSelection = new StringSelection(json);
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
     }
