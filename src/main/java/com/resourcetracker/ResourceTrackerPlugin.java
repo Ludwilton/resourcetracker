@@ -18,6 +18,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
+import net.runelite.api.gameval.InventoryID;
 
 import javax.inject.Inject;
 import java.awt.image.BufferedImage;
@@ -35,7 +36,6 @@ import java.util.Map;
 )
 public class ResourceTrackerPlugin extends Plugin
 {
-	private static final int BANK_INVENTORY_ID = 95;
 
 	@Inject
 	private Client client;
@@ -105,14 +105,14 @@ public class ResourceTrackerPlugin extends Plugin
 		}
 	}
 
-	@Subscribe
-	public void onItemContainerChanged(ItemContainerChanged event)
-	{
-		if (event.getContainerId() == BANK_INVENTORY_ID)
-		{
-			updateBankItems(event.getItemContainer());
-		}
-	}
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        if (event.getContainerId() == InventoryID.BANK)
+        {
+            updateBankItems(event.getItemContainer());
+        }
+    }
 
     private void updateBankItems(ItemContainer itemContainer)
     {
