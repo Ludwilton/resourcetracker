@@ -14,7 +14,6 @@ import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
@@ -45,17 +44,11 @@ public class ResourceTrackerPlugin extends Plugin
         @Inject
         private ClientToolbar clientToolbar;
 
-        // @Inject
-        // private Client client;
-
         @Inject
         private ItemManager itemManager;
 
         @Inject
         private ConfigManager configManager;
-
-        @Inject
-        private EventBus eventBus;
 
         @Inject
         @Getter
@@ -91,7 +84,6 @@ public class ResourceTrackerPlugin extends Plugin
                         .build();
 
                 clientToolbar.addNavigation(navButton);
-                eventBus.register(this);
 
                 loadTrackedItems();
         }
@@ -100,7 +92,6 @@ public class ResourceTrackerPlugin extends Plugin
         protected void shutDown()
         {
                 log.debug("Resource Tracker stopped!");
-                eventBus.unregister(this);
                 saveTrackedItems(panel.getTrackedItems());
                 clientToolbar.removeNavigation(navButton);
         }
