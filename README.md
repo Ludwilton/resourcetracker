@@ -8,6 +8,8 @@ Items are organized into custom categories, and the plugin automatically updates
 
 ![plugindemo](./img/plugindemo.webp)
 
+_demo is old, amounts are now input in chatpanel_
+
 ## Features
 
 - **Item Tracking**: Track any item with a current quantity and a goal quantity.
