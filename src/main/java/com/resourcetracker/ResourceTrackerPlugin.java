@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.Client;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.client.game.chatbox.ChatboxPanelManager;
@@ -21,7 +22,6 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
-import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.ChatMessageType;
 
 import javax.inject.Inject;
@@ -51,6 +51,12 @@ public class ResourceTrackerPlugin extends Plugin
         private ConfigManager configManager;
 
         @Inject
+        private ResourceTrackerConfig config;
+
+        @Inject
+        private Client client;
+
+        @Inject
         @Getter
         private Gson gson;
 
@@ -64,11 +70,15 @@ public class ResourceTrackerPlugin extends Plugin
         @Inject
         private net.runelite.client.ui.ClientUI clientUi;
 
-        private ResourceTrackerPanel panel;
-        private NavigationButton navButton;
+	private ResourceTrackerPanel panel;
+	private NavigationButton navButton;
+	private final Map<Integer, TrackedItem> trackedItems = new HashMap<>();
 
-        @Override
-        protected void startUp()
+	// Dynamic container cache - one map per container ID
+	private final Map<Integer, Map<Integer, Integer>> containerCaches = new HashMap<>();
+
+	@Override
+	protected void startUp()
         {
                 log.debug("Resource Tracker started");
 
@@ -85,32 +95,35 @@ public class ResourceTrackerPlugin extends Plugin
 
                 clientToolbar.addNavigation(navButton);
 
-                loadTrackedItems();
+                loadData();
         }
 
         @Override
         protected void shutDown()
         {
                 log.debug("Resource Tracker stopped!");
-                saveTrackedItems(panel.getTrackedItems());
+                saveData();
                 clientToolbar.removeNavigation(navButton);
         }
 
-        @SuppressWarnings("unused")
-        @Subscribe
-        public void onGameStateChanged(GameStateChanged event)
-        {
-                if (event.getGameState() == GameState.LOGGED_IN)
-                {
-                        // Load tracked items when player logs in
-                        loadTrackedItems();
-                }
-                else if (event.getGameState() == GameState.LOGIN_SCREEN)
-                {
-                        // Clear panel when logging out
-                        panel.resetPanel();
-                }
-        }
+	@SuppressWarnings("unused")
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		if (event.getGameState() == GameState.LOGGED_IN)
+		{
+			// Load tracked items when player logs in
+			loadData();
+		}
+		else if (event.getGameState() == GameState.LOGIN_SCREEN)
+		{
+			// Save data when logging out
+			saveData();
+
+			// Clear panel UI when logging out
+			panel.resetPanel();
+		}
+	}
 
         public void sendChatMessage(String message)
         {
@@ -120,94 +133,256 @@ public class ResourceTrackerPlugin extends Plugin
                         .build());
         }
 
-        @SuppressWarnings("unused")
-        @Subscribe
-        public void onItemContainerChanged(ItemContainerChanged event)
-        {
-                if (event.getContainerId() == InventoryID.BANK)
-                {
-                        updateBankItems(event.getItemContainer());
-                }
-        }
+	@SuppressWarnings("unused")
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		int containerId = event.getContainerId();
+		ContainerTracker.Container container = ContainerTracker.getContainer(containerId);
 
-        private void updateBankItems(ItemContainer itemContainer)
-        {
-                if (itemContainer == null)
-                {
-                        return;
-                }
+		// Check if this is a registered container and if tracking is enabled for it
+		if (container != null && isContainerTrackingEnabled(container))
+		{
+			updateContainerCache(containerId, event.getItemContainer());
+			updateTrackedItems();
+		}
+	}
 
-                Map<Integer, Integer> bankItems = new HashMap<>();
-                for (Item item : itemContainer.getItems())
-                {
-                        if (item.getId() > 0)
-                        {
-                                bankItems.merge(item.getId(), item.getQuantity(), Integer::sum);
-                        }
-                }
+	/**
+	 * Check if tracking is enabled for a specific container via config.
+	 */
+	private boolean isContainerTrackingEnabled(ContainerTracker.Container container)
+	{
+		String configKey = container.getConfigKey();
 
-                boolean needsUpdate = false;
-                List<TrackedItem> items = panel.getTrackedItems();
+		// Use reflection or direct mapping to check config
+		switch (configKey)
+		{
+			case "trackBank":
+				return config.trackBank();
+			case "trackInventory":
+				return config.trackInventory();
+			case "trackSeedVault":
+				return config.trackSeedVault();
+			default:
+				return false;
+		}
+	}
 
-                for (TrackedItem trackedItem : items)
-                {
-                        int amount = bankItems.getOrDefault(trackedItem.getItemId(), 0);
-                        if (trackedItem.getCurrentAmount() != amount)
-                        {
-                                trackedItem.setCurrentAmount(amount);
-                                needsUpdate = true;
-                        }
-                }
+	/**
+	 * Update the cache for a specific container.
+	 * This method is generic and works for any container type.
+	 */
+	private void updateContainerCache(int containerId, ItemContainer container)
+	{
+		if (container == null)
+		{
+			return;
+		}
 
-                if (needsUpdate)
-                {
-                        saveTrackedItems(items);
-                        SwingUtilities.invokeLater(() -> panel.rebuild());
-                }
-        }
+		// Get or create cache for this container
+		Map<Integer, Integer> cache = containerCaches.computeIfAbsent(containerId, k -> new HashMap<>());
+		cache.clear();
 
-        public void saveTrackedItems(List<TrackedItem> items)
-        {
-                String json = gson.toJson(items);
-                log.debug("Saving tracked items: {}", json);
-                configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
-        }
+		// Cache all items in the container
+		for (Item item : container.getItems())
+		{
+			if (item.getId() > 0)
+			{
+				cache.merge(item.getId(), item.getQuantity(), Integer::sum);
+			}
+		}
+	}
+
+	private void updateTrackedItems()
+	{
+		// If no items are tracked, skip the update
+		if (trackedItems.isEmpty())
+		{
+			return;
+		}
+
+		boolean needsUpdate = false;
+
+		// Only iterate through tracked items, not all container items
+		for (TrackedItem trackedItem : trackedItems.values())
+		{
+			int itemId = trackedItem.getItemId();
+			int totalAmount = 0;
+			Map<String, Integer> breakdown = new HashMap<>(trackedItem.getContainerQuantities());
+			boolean hasScannedData = false;
+
+			// Dynamically check all registered containers
+			for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
+			{
+				// Check if tracking is enabled for this container
+				if (!isContainerTrackingEnabled(container))
+				{
+					continue;
+				}
+
+				Map<Integer, Integer> cache = containerCaches.get(container.getId());
+
+				// If we have scanned this container
+				if (cache != null && !cache.isEmpty())
+				{
+					Integer quantity = cache.get(itemId);
+					breakdown.put(container.getName(), quantity != null ? quantity : 0);
+					totalAmount += (quantity != null ? quantity : 0);
+					hasScannedData = true;
+				}
+				// If we haven't scanned but have saved data, keep it
+				else if (breakdown.containsKey(container.getName()))
+				{
+					totalAmount += breakdown.get(container.getName());
+				}
+			}
+
+			// Only update if we have scanned data and something changed
+			if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !trackedItem.getContainerQuantities().equals(breakdown)))
+			{
+				trackedItem.setCurrentAmount(totalAmount);
+				trackedItem.setContainerQuantities(breakdown);
+				needsUpdate = true;
+			}
+		}
+
+		if (needsUpdate)
+		{
+			// Defer save and UI update to avoid blocking the game thread
+			SwingUtilities.invokeLater(() -> {
+				saveData();
+				panel.rebuild();
+			});
+		}
+	}
+
+	public void addTrackedItem(TrackedItem item)
+	{
+		if (trackedItems.containsKey(item.getItemId()))
+		{
+			return;
+		}
+
+		trackedItems.put(item.getItemId(), item);
+
+		// Use cached container data to populate initial quantities
+		Map<String, Integer> containerQuantities = new HashMap<>();
+
+		// Dynamically check all registered containers
+		for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
+		{
+			// Check if tracking is enabled for this container
+			if (!isContainerTrackingEnabled(container))
+			{
+				continue;
+			}
+
+			Map<Integer, Integer> cache = containerCaches.get(container.getId());
+			if (cache != null && cache.containsKey(item.getItemId()))
+			{
+				containerQuantities.put(container.getName(), cache.get(item.getItemId()));
+			}
+		}
+
+		// Set the container quantities and calculate total
+		if (!containerQuantities.isEmpty())
+		{
+			item.setContainerQuantities(containerQuantities);
+			int total = containerQuantities.values().stream().mapToInt(Integer::intValue).sum();
+			item.setCurrentAmount(total);
+		}
+
+		SwingUtilities.invokeLater(() -> panel.rebuild());
+		saveData();
+	}
+
+	public void removeTrackedItem(int itemId)
+	{
+		trackedItems.remove(itemId);
+		SwingUtilities.invokeLater(() -> panel.rebuild());
+		saveData();
+	}
+
+	public Map<Integer, TrackedItem> getTrackedItems()
+	{
+		return trackedItems;
+	}
 
 
-        private void loadTrackedItems()
-        {
-                String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
-                log.debug("Loading tracked items: {}", json);
+	public void saveData()
+	{
+		if (trackedItems.isEmpty())
+		{
+			configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+			return;
+		}
 
-                if (json == null || json.isEmpty())
-                {
-                        log.debug("No tracked items found in profile");
-                        return;
-                }
+		Gson gson = new Gson();
+		List<TrackedItem> itemList = new ArrayList<>(trackedItems.values());
+		String json = gson.toJson(itemList);
+		log.debug("Saving {} tracked items to config", trackedItems.size());
+		configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+	}
 
-                try
-                {
-                        Type listType = new TypeToken<ArrayList<TrackedItem>>(){}.getType();
-                        List<TrackedItem> items = gson.fromJson(json, listType);
-                        if (items != null)
-                        {
-                                log.debug("Loaded {} items", items.size());
-                                panel.setTrackedItems(items);
-                        }
-                }
-                catch (Exception e)
-                {
-                        log.error("Failed to load tracked items", e);
-                }
-        }
+	private void loadData()
+	{
+		String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
+		if (json == null || json.isEmpty())
+		{
+			log.debug("No tracked items to load from config");
+			return;
+		}
 
-        public net.runelite.client.ui.ClientUI getClientUi() {
-            return clientUi;
-        }
+		try
+		{
+			Gson gson = new Gson();
+			Type type = new TypeToken<List<TrackedItem>>()
+			{
+			}.getType();
+			List<TrackedItem> itemList = gson.fromJson(json, type);
 
-        @Provides
-        ResourceTrackerConfig provideConfig(ConfigManager configManager)
-        {
-                return configManager.getConfig(ResourceTrackerConfig.class);
-        }
+			if (itemList == null)
+			{
+				log.warn("Failed to deserialize tracked items - null result");
+				return;
+			}
+
+			trackedItems.clear();
+			for (TrackedItem item : itemList)
+			{
+				if (item != null && item.getItemId() > 0)
+				{
+					// Ensure containerQuantities is not null
+					if (item.getContainerQuantities() == null)
+					{
+						item.setContainerQuantities(new HashMap<>());
+					}
+					// Ensure category is not null
+					if (item.getCategory() == null || item.getCategory().isEmpty())
+					{
+						item.setCategory("Default");
+					}
+					trackedItems.put(item.getItemId(), item);
+				}
+			}
+
+			log.debug("Loaded {} tracked items from config", trackedItems.size());
+			SwingUtilities.invokeLater(() -> panel.loadItems(trackedItems.values()));
+		}
+		catch (Exception e)
+		{
+			log.error("Error loading tracked items from config", e);
+		}
+	}
+
+	public net.runelite.client.ui.ClientUI getClientUi() {
+		return clientUi;
+	}
+
+	@Provides
+	ResourceTrackerConfig provideConfig(ConfigManager configManager)
+	{
+		return configManager.getConfig(ResourceTrackerConfig.class);
+	}
 }

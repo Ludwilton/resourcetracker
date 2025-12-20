@@ -13,6 +13,7 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 public class CategoryBox extends JPanel
@@ -223,7 +224,7 @@ public class CategoryBox extends JPanel
 
 		// Item icon (centered)
 		JLabel iconLabel = new JLabel();
-		iconLabel.setToolTipText(item.getItemName());
+		iconLabel.setToolTipText(buildItemTooltip(item));
 		iconLabel.setVerticalAlignment(SwingConstants.CENTER);
 		iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
 		AsyncBufferedImage itemImage = itemManager.getImage(item.getItemId());
@@ -268,7 +269,7 @@ public class CategoryBox extends JPanel
 		popupMenu.add(editItem);
 
 		JMenuItem deleteItem = new JMenuItem("Remove");
-		deleteItem.addActionListener(ev -> parentPanel.removeTrackedItem(item));
+		deleteItem.addActionListener(ev -> parentPanel.removeTrackedItem(item.getItemId()));
 		popupMenu.add(deleteItem);
 
 		setComponentPopupMenu(slotContainer, popupMenu);
@@ -315,8 +316,8 @@ public class CategoryBox extends JPanel
 						}
 
 						item.setGoalAmount(newGoal);
-						plugin.saveTrackedItems(parentPanel.getTrackedItems());
-						parentPanel.rebuild();
+										plugin.saveData();
+										parentPanel.rebuild();
 					}
 					catch (NumberFormatException ex)
 					{
@@ -325,5 +326,25 @@ public class CategoryBox extends JPanel
 				});
 			})
 			.build();
+	}
+
+	private String buildItemTooltip(TrackedItem item)
+	{
+		StringBuilder tooltip = new StringBuilder("<html><b>").append(item.getItemName()).append("</b>");
+
+		Map<String, Integer> containers = item.getContainerQuantities();
+		if (containers != null && !containers.isEmpty())
+		{
+			containers.entrySet().stream()
+				.filter(e -> e.getValue() > 0)
+				.sorted(Map.Entry.comparingByKey())
+				.forEach(e -> tooltip.append("<br>")
+					.append(e.getKey())
+					.append(": ")
+					.append(String.format("%,d", e.getValue())));
+		}
+
+		tooltip.append("</html>");
+		return tooltip.toString();
 	}
 }

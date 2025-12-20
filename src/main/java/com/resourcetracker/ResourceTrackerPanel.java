@@ -317,25 +317,21 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void addTrackedItem(TrackedItem item)
     {
-        trackedItems.add(item);
-        plugin.saveTrackedItems(trackedItems);
-        rebuildTrackedItems();
+        plugin.addTrackedItem(item);
     }
 
-    public void removeTrackedItem(TrackedItem item)
+    public void removeTrackedItem(int itemId)
     {
-        trackedItems.remove(item);
-        plugin.saveTrackedItems(trackedItems);
-        rebuildTrackedItems();
+        plugin.removeTrackedItem(itemId);
     }
 
 
     public List<TrackedItem> getTrackedItems()
     {
-        return trackedItems;
+        return new ArrayList<>(plugin.getTrackedItems().values());
     }
 
-    public void setTrackedItems(List<TrackedItem> items)
+    public void loadItems(java.util.Collection<TrackedItem> items)
     {
         trackedItems.clear();
         trackedItems.addAll(items);
@@ -359,7 +355,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void rebuild()
     {
-        rebuildTrackedItems();
+        loadItems(plugin.getTrackedItems().values());
     }
 
     public void setSelectedCategory(String category)
@@ -382,8 +378,12 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void deleteCategory(String categoryName)
     {
-        // Remove all items in this category
-        trackedItems.removeIf(item -> item.getCategory().equals(categoryName));
+        // Get items from plugin and remove those in this category
+        List<TrackedItem> itemsToRemove = plugin.getTrackedItems().values().stream()
+                .filter(item -> item.getCategory().equals(categoryName))
+                .collect(Collectors.toList());
+
+        itemsToRemove.forEach(item -> plugin.removeTrackedItem(item.getItemId()));
 
         // Clear selected category if it's the one being deleted
         if (categoryName.equals(selectedCategory))
@@ -393,13 +393,12 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             searchBar.setToolTipText("Create or select a category to add items");
         }
 
-        plugin.saveTrackedItems(trackedItems);
         rebuildTrackedItems();
     }
 
     public void exportCategory(String categoryName)
     {
-        List<TrackedItem> categoryItems = trackedItems.stream()
+        List<TrackedItem> categoryItems = plugin.getTrackedItems().values().stream()
                 .filter(item -> item.getCategory().equals(categoryName))
                 .collect(Collectors.toList());
 
@@ -489,15 +488,14 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             if (importedItem != null && importedItem.getItemId() > 0 && importedItem.getItemName() != null)
             {
                 importedItem.setCategory(targetCategory);
-                // Reset current amount, as it's based on bank state
+                // Reset current amount, as it's based on container state
                 importedItem.setCurrentAmount(0);
-                // Remove existing item if present in the same category before adding the new one
-                trackedItems.removeIf(existing -> existing.getItemId() == importedItem.getItemId() && existing.getCategory().equals(targetCategory));
-                trackedItems.add(importedItem);
+                // Remove existing item if present before adding the new one
+                plugin.removeTrackedItem(importedItem.getItemId());
+                plugin.addTrackedItem(importedItem);
             }
         }
 
-        plugin.saveTrackedItems(trackedItems);
         rebuildTrackedItems();
     }
 
@@ -511,7 +509,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         String trimmedCategoryName = categoryName.trim();
 
         // Check if category already exists
-        boolean exists = trackedItems.stream()
+        boolean exists = plugin.getTrackedItems().values().stream()
                 .anyMatch(item -> item.getCategory().equalsIgnoreCase(trimmedCategoryName));
 
         if (exists)
@@ -706,15 +704,13 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }
 
                 // Check if already tracked in the current category, if so, update it
-                for (TrackedItem existing : trackedItems)
+                TrackedItem existing = plugin.getTrackedItems().get(itemDef.getId());
+                if (existing != null && existing.getCategory().equals(selectedCategory))
                 {
-                    if (existing.getItemId() == itemDef.getId() && existing.getCategory().equals(selectedCategory))
-                    {
-                        existing.setGoalAmount(goal);
-                        plugin.saveTrackedItems(trackedItems);
-                        clearSearchAndRebuild();
-                        return;
-                    }
+                    existing.setGoalAmount(goal);
+                    plugin.saveData();
+                    clearSearchAndRebuild();
+                    return;
                 }
 
                 // If not tracked, add as a new item
@@ -759,8 +755,11 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             SwingUtil.fastRemoveAll(itemListPanel);
             categoryBoxes.clear();
 
+            // Get items from plugin
+            List<TrackedItem> items = new ArrayList<>(plugin.getTrackedItems().values());
+
             // Ensure all items have a category (for backward compatibility)
-            trackedItems.forEach(item -> {
+            items.forEach(item -> {
                 if (item.getCategory() == null || item.getCategory().isEmpty())
                 {
                     item.setCategory("Default");
@@ -768,12 +767,12 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             });
 
             // Group items by category
-            java.util.Map<String, List<TrackedItem>> itemsByCategory = trackedItems.stream()
+            java.util.Map<String, List<TrackedItem>> itemsByCategory = items.stream()
                     .collect(Collectors.groupingBy(TrackedItem::getCategory));
 
             // Use a LinkedHashSet to preserve insertion order
             java.util.Set<String> categoryNames = new java.util.LinkedHashSet<>();
-            for (TrackedItem item : trackedItems)
+            for (TrackedItem item : items)
             {
                 categoryNames.add(item.getCategory());
             }
