@@ -37,4 +37,34 @@ public interface ResourceTrackerConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		keyName = "trackGravestone",
+		name = "Track Gravestone",
+		description = "Track items in your Gravestone"
+	)
+	default boolean trackGravestone()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "trackGroupStorage",
+		name = "Track Group Storage",
+		description = "Track items in Group Storage"
+	)
+	default boolean trackGroupStorage()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "trackBoatInventory",
+		name = "Track Boat Inventory",
+		description = "Track items in your Sailing boats"
+	)
+	default boolean trackBoatInventory()
+	{
+		return true;
+	}
 }

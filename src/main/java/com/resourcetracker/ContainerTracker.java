@@ -47,6 +47,18 @@ public class ContainerTracker
 	public static final Container BANK = new Container(95, "Bank", "trackBank");
 	public static final Container INVENTORY = new Container(93, "Inventory", "trackInventory");
 	public static final Container SEED_VAULT = new Container(626, "Seed Vault", "trackSeedVault");
+	public static final Container GRAVESTONE = new Container(525, "Gravestone", "trackGravestone");
+	public static final Container GROUP_STORAGE = new Container(659, "Group storage", "trackGroupStorage");
+	public static final Container BOAT_1 = new Container(963, "Boat 1", "trackBoatInventory");
+	public static final Container BOAT_1_ALT = new Container(33731, "Boat 1", "trackBoatInventory"); // Alternate ID
+	public static final Container BOAT_2 = new Container(964, "Boat 2", "trackBoatInventory");
+	public static final Container BOAT_2_ALT = new Container(33732, "Boat 2", "trackBoatInventory"); // Alternate ID
+	public static final Container BOAT_3 = new Container(965, "Boat 3", "trackBoatInventory");
+	public static final Container BOAT_3_ALT = new Container(33733, "Boat 3", "trackBoatInventory"); // Alternate ID
+	public static final Container BOAT_4 = new Container(966, "Boat 4", "trackBoatInventory");
+	public static final Container BOAT_4_ALT = new Container(33734, "Boat 4", "trackBoatInventory"); // Alternate ID
+	public static final Container BOAT_5 = new Container(967, "Boat 5", "trackBoatInventory");
+	public static final Container BOAT_5_ALT = new Container(33735, "Boat 5", "trackBoatInventory"); // Alternate ID
 
 	// Map for quick lookup by ID
 	private static final Map<Integer, Container> CONTAINER_BY_ID = new HashMap<>();
@@ -58,6 +70,18 @@ public class ContainerTracker
 		registerContainer(BANK);
 		registerContainer(INVENTORY);
 		registerContainer(SEED_VAULT);
+		registerContainer(GRAVESTONE);
+		registerContainer(GROUP_STORAGE);
+		registerContainer(BOAT_1);
+		registerContainer(BOAT_1_ALT);
+		registerContainer(BOAT_2);
+		registerContainer(BOAT_2_ALT);
+		registerContainer(BOAT_3);
+		registerContainer(BOAT_3_ALT);
+		registerContainer(BOAT_4);
+		registerContainer(BOAT_4_ALT);
+		registerContainer(BOAT_5);
+		registerContainer(BOAT_5_ALT);
 	}
 
 	private static void registerContainer(Container container)

@@ -164,6 +164,12 @@ public class ResourceTrackerPlugin extends Plugin
 				return config.trackInventory();
 			case "trackSeedVault":
 				return config.trackSeedVault();
+			case "trackGravestone":
+				return config.trackGravestone();
+			case "trackGroupStorage":
+				return config.trackGroupStorage();
+			case "trackBoatInventory":
+				return config.trackBoatInventory();
 			default:
 				return false;
 		}
@@ -180,8 +186,11 @@ public class ResourceTrackerPlugin extends Plugin
 			return;
 		}
 
+		// Normalize container IDs to use the same cache for alternate IDs
+		int cacheId = normalizeContainerId(containerId);
+
 		// Get or create cache for this container
-		Map<Integer, Integer> cache = containerCaches.computeIfAbsent(containerId, k -> new HashMap<>());
+		Map<Integer, Integer> cache = containerCaches.computeIfAbsent(cacheId, k -> new HashMap<>());
 		cache.clear();
 
 		// Cache all items in the container
@@ -192,6 +201,22 @@ public class ResourceTrackerPlugin extends Plugin
 				cache.merge(item.getId(), item.getQuantity(), Integer::sum);
 			}
 		}
+	}
+
+	/**
+	 * Normalize container IDs to use the same cache for alternate IDs.
+	 * Examples: 660 -> 93 (temp inventory), 33731 -> 963 (boat 1 alternate)
+	 */
+	private int normalizeContainerId(int containerId)
+	{
+
+		// Boats: Normalize alternate IDs (33731-33735) to primary IDs (963-967)
+		if (containerId >= 33731 && containerId <= 33735)
+		{
+			return 963 + (containerId - 33731); // 33731->963, 33732->964, etc.
+		}
+
+		return containerId; // No normalization needed
 	}
 
 	private void updateTrackedItems()
@@ -209,8 +234,12 @@ public class ResourceTrackerPlugin extends Plugin
 		{
 			int itemId = trackedItem.getItemId();
 			int totalAmount = 0;
-			Map<String, Integer> breakdown = new HashMap<>(trackedItem.getContainerQuantities());
+			Map<String, Integer> breakdown = new HashMap<>();
+			Map<String, Integer> savedBreakdown = trackedItem.getContainerQuantities();
 			boolean hasScannedData = false;
+
+			// Track which normalized cache IDs we've already processed to avoid double-counting
+			java.util.Set<Integer> processedCaches = new java.util.HashSet<>();
 
 			// Dynamically check all registered containers
 			for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
@@ -221,25 +250,38 @@ public class ResourceTrackerPlugin extends Plugin
 					continue;
 				}
 
-				Map<Integer, Integer> cache = containerCaches.get(container.getId());
+				// Get the normalized cache ID to avoid counting alternate IDs twice
+				int normalizedCacheId = normalizeContainerId(container.getId());
 
-				// If we have scanned this container
-				if (cache != null && !cache.isEmpty())
+				// Skip if we've already processed this cache (e.g., alternate ID for same container)
+				if (processedCaches.contains(normalizedCacheId))
 				{
-					Integer quantity = cache.get(itemId);
-					breakdown.put(container.getName(), quantity != null ? quantity : 0);
-					totalAmount += (quantity != null ? quantity : 0);
-					hasScannedData = true;
+					continue;
 				}
-				// If we haven't scanned but have saved data, keep it
-				else if (breakdown.containsKey(container.getName()))
-				{
-					totalAmount += breakdown.get(container.getName());
-				}
+
+			processedCaches.add(normalizedCacheId);
+			Map<Integer, Integer> cache = containerCaches.get(normalizedCacheId);
+
+			// If we have scanned this container (cache exists, even if empty)
+			if (cache != null)
+			{
+				Integer quantity = cache.get(itemId);
+				int qty = (quantity != null ? quantity : 0);
+				breakdown.put(container.getName(), qty);
+				totalAmount += qty;
+				hasScannedData = true;
+			}
+			// If we haven't scanned but have saved data, keep it
+			else if (savedBreakdown != null && savedBreakdown.containsKey(container.getName()))
+			{
+				int savedQty = savedBreakdown.get(container.getName());
+				breakdown.put(container.getName(), savedQty);
+				totalAmount += savedQty;
+			}
 			}
 
 			// Only update if we have scanned data and something changed
-			if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !trackedItem.getContainerQuantities().equals(breakdown)))
+			if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !breakdown.equals(savedBreakdown)))
 			{
 				trackedItem.setCurrentAmount(totalAmount);
 				trackedItem.setContainerQuantities(breakdown);
@@ -269,6 +311,9 @@ public class ResourceTrackerPlugin extends Plugin
 		// Use cached container data to populate initial quantities
 		Map<String, Integer> containerQuantities = new HashMap<>();
 
+		// Track which normalized cache IDs we've already processed to avoid double-counting
+		java.util.Set<Integer> processedCaches = new java.util.HashSet<>();
+
 		// Dynamically check all registered containers
 		for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
 		{
@@ -278,7 +323,17 @@ public class ResourceTrackerPlugin extends Plugin
 				continue;
 			}
 
-			Map<Integer, Integer> cache = containerCaches.get(container.getId());
+			// Get the normalized cache ID to avoid counting alternate IDs twice
+			int normalizedCacheId = normalizeContainerId(container.getId());
+
+			// Skip if we've already processed this cache (e.g., alternate ID for same container)
+			if (processedCaches.contains(normalizedCacheId))
+			{
+				continue;
+			}
+
+			processedCaches.add(normalizedCacheId);
+			Map<Integer, Integer> cache = containerCaches.get(normalizedCacheId);
 			if (cache != null && cache.containsKey(item.getItemId()))
 			{
 				containerQuantities.put(container.getName(), cache.get(item.getItemId()));
