@@ -5,18 +5,28 @@ import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.EnumComposition;
+import net.runelite.api.EnumID;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.Client;
+import net.runelite.api.ScriptID;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.client.game.chatbox.ChatboxPanelManager;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -29,6 +39,9 @@ import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +70,9 @@ public class ResourceTrackerPlugin extends Plugin
         private Client client;
 
         @Inject
+        private ClientThread clientThread;
+
+        @Inject
         @Getter
         private Gson gson;
 
@@ -74,8 +90,15 @@ public class ResourceTrackerPlugin extends Plugin
 	private NavigationButton navButton;
 	private final Map<Integer, TrackedItem> trackedItems = new HashMap<>();
 
+	// Track category order for consistent display
+	private final List<String> categoryOrder = new ArrayList<>();
+
 	// Dynamic container cache - one map per container ID
 	private final Map<Integer, Map<Integer, Integer>> containerCaches = new HashMap<>();
+
+	// Potion storage tracking
+	private boolean rebuildPotions = false;
+	private Set<Integer> potionStoreVars;
 
 	@Override
 	protected void startUp()
@@ -114,13 +137,25 @@ public class ResourceTrackerPlugin extends Plugin
 		{
 			// Load tracked items when player logs in
 			loadData();
+
+			// Check if bank is already open and potion storage should be initialized
+			// Must be called on client thread
+			if (config.trackPotionStorage())
+			{
+				clientThread.invokeLater(() ->
+				{
+					if (client.getItemContainer(InventoryID.BANK) != null)
+					{
+						rebuildPotions = true;
+					}
+				});
+			}
 		}
 		else if (event.getGameState() == GameState.LOGIN_SCREEN)
 		{
 			// Save data when logging out
 			saveData();
-
-			// Clear panel UI when logging out
+			// Clear panel when logging out
 			panel.resetPanel();
 		}
 	}
@@ -168,6 +203,10 @@ public class ResourceTrackerPlugin extends Plugin
 				return config.trackGravestone();
 			case "trackGroupStorage":
 				return config.trackGroupStorage();
+			case "trackLootingBag":
+				return config.trackLootingBag();
+			case "trackPotionStorage":
+				return config.trackPotionStorage();
 			case "trackBoatInventory":
 				return config.trackBoatInventory();
 			default:
@@ -364,12 +403,114 @@ public class ResourceTrackerPlugin extends Plugin
 		return trackedItems;
 	}
 
+	/**
+	 * Detect when bank finishes building to trigger potion storage rebuild.
+	 */
+	@SuppressWarnings("unused")
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event)
+	{
+		if (event.getScriptId() == ScriptID.BANKMAIN_FINISHBUILDING && config.trackPotionStorage())
+		{
+			rebuildPotions = true;
+		}
+	}
+
+	/**
+	 * On client tick, rebuild potion storage if flagged and cache the varbit triggers.
+	 */
+	@SuppressWarnings("unused")
+	@Subscribe
+	public void onClientTick(ClientTick event)
+	{
+		if (rebuildPotions)
+		{
+			updatePotionStorageCache();
+			rebuildPotions = false;
+
+			// Cache the varbits that trigger potion store rebuilds (only do this once)
+			Widget w = client.getWidget(InterfaceID.Bankmain.POTIONSTORE_ITEMS);
+			if (w != null && potionStoreVars == null)
+			{
+				int[] trigger = w.getVarTransmitTrigger();
+				potionStoreVars = new HashSet<>();
+				Arrays.stream(trigger).forEach(potionStoreVars::add);
+			}
+		}
+	}
+
+	/**
+	 * Watch for varbit changes that affect potion storage.
+	 */
+	@SuppressWarnings("unused")
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged varbitChanged)
+	{
+		if (potionStoreVars != null && potionStoreVars.contains(varbitChanged.getVarpId()))
+		{
+			rebuildPotions = true;
+		}
+	}
+
+	/**
+	 * Update the potion storage cache by reading from game enums and scripts.
+	 * potion storage doesn't have a normal ItemContainer.
+	 */
+	private void updatePotionStorageCache()
+	{
+		final Map<Integer, Integer> potionQtyMap = new HashMap<>();
+
+		// Get potion enums from the client
+		EnumComposition potionStorePotions = client.getEnum(EnumID.POTIONSTORE_POTIONS);
+		EnumComposition potionStoreUnfinishedPotions = client.getEnum(EnumID.POTIONSTORE_UNFINISHED_POTIONS);
+
+		// Process both regular and unfinished potions
+		for (EnumComposition e : new EnumComposition[]{potionStorePotions, potionStoreUnfinishedPotions})
+		{
+			for (int potionEnumId : e.getIntVals())
+			{
+				EnumComposition potionEnum = client.getEnum(potionEnumId);
+
+				// Run the script to get the dose count for this potion
+				client.runScript(ScriptID.POTIONSTORE_DOSES, potionEnumId);
+				int doses = client.getIntStack()[0];
+
+				if (doses > 0)
+				{
+					for (int doseLevel = 1; doseLevel <= 4; doseLevel++)
+					{
+						int itemId = potionEnum.getIntValue(doseLevel);
+						if (itemId > 0)
+						{
+							// Convert total doses into containers of this dose level
+							int quantity = doses / doseLevel;
+							potionQtyMap.put(itemId, quantity);
+						}
+					}
+				}
+			}
+		}
+
+		// Update the cache with potion storage fake container ID
+		int potionStorageId = ContainerTracker.POTION_STORAGE.getId();
+		int cacheId = normalizeContainerId(potionStorageId);
+		Map<Integer, Integer> cache = containerCaches.computeIfAbsent(cacheId, k -> new HashMap<>());
+		cache.clear();
+		cache.putAll(potionQtyMap);
+
+		log.debug("Updated potion storage cache with {} potion types", potionQtyMap.size());
+
+		// Update tracked items
+		updateTrackedItems();
+	}
+
 
 	public void saveData()
 	{
 		if (trackedItems.isEmpty())
 		{
 			configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+			saveCategoryOrder(); // Still save order even if no items
 			return;
 		}
 
@@ -378,10 +519,89 @@ public class ResourceTrackerPlugin extends Plugin
 		String json = gson.toJson(itemList);
 		log.debug("Saving {} tracked items to config", trackedItems.size());
 		configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+
+		// Save category order
+		saveCategoryOrder();
+	}
+
+	private void saveCategoryOrder()
+	{
+		String orderJson = gson.toJson(categoryOrder);
+		configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", orderJson);
+		log.debug("Saved category order: {}", categoryOrder);
+	}
+
+	private void loadCategoryOrder()
+	{
+		String orderJson = configManager.getRSProfileConfiguration("resourcetracker", "categoryOrder");
+		if (orderJson != null && !orderJson.isEmpty())
+		{
+			try
+			{
+				Type type = new TypeToken<List<String>>(){}.getType();
+				List<String> loaded = gson.fromJson(orderJson, type);
+				if (loaded != null)
+				{
+					categoryOrder.clear();
+					categoryOrder.addAll(loaded);
+					log.debug("Loaded category order: {}", categoryOrder);
+				}
+			}
+			catch (Exception e)
+			{
+				log.error("Error loading category order", e);
+			}
+		}
+	}
+
+	public void registerCategory(String categoryName)
+	{
+		if (!categoryOrder.contains(categoryName))
+		{
+			categoryOrder.add(categoryName);
+			saveCategoryOrder();
+			log.debug("Registered new category: {}", categoryName);
+		}
+	}
+
+	public void removeCategory(String categoryName)
+	{
+		categoryOrder.remove(categoryName);
+		saveCategoryOrder();
+		log.debug("Removed category: {}", categoryName);
+	}
+
+	public void renameCategory(String oldName, String newName)
+	{
+		int index = categoryOrder.indexOf(oldName);
+		if (index != -1)
+		{
+			categoryOrder.set(index, newName);
+			saveCategoryOrder();
+			saveData();
+			log.debug("Renamed category '{}' to '{}'", oldName, newName);
+		}
+	}
+
+	public void moveCategoryOrder(String categoryName, int newIndex)
+	{
+		categoryOrder.remove(categoryName);
+		categoryOrder.add(newIndex, categoryName);
+		saveCategoryOrder();
+		SwingUtilities.invokeLater(() -> panel.rebuild());
+		log.debug("Moved category {} to index {}", categoryName, newIndex);
+	}
+
+	public List<String> getCategoryOrder()
+	{
+		return new ArrayList<>(categoryOrder);
 	}
 
 	private void loadData()
 	{
+		// Load category order first
+		loadCategoryOrder();
+
 		String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
 		if (json == null || json.isEmpty())
 		{
@@ -419,6 +639,12 @@ public class ResourceTrackerPlugin extends Plugin
 						item.setCategory("Default");
 					}
 					trackedItems.put(item.getItemId(), item);
+
+					// Register category if not already in order
+					if (!categoryOrder.contains(item.getCategory()))
+					{
+						categoryOrder.add(item.getCategory());
+					}
 				}
 			}
 

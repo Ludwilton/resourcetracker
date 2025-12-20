@@ -10,6 +10,10 @@ import net.runelite.client.util.AsyncBufferedImage;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
+import java.awt.dnd.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
@@ -29,6 +33,7 @@ public class CategoryBox extends JPanel
 	private final JPanel headerPanel = new JPanel();
 
 	private List<TrackedItem> items;
+	private boolean isSelected = false;
 
 	public CategoryBox(String categoryName, ResourceTrackerPlugin plugin, ItemManager itemManager, ResourceTrackerPanel parentPanel, ChatboxPanelManager chatboxPanelManager)
 	{
@@ -56,7 +61,10 @@ public class CategoryBox extends JPanel
 		add(headerPanel, BorderLayout.NORTH);
 		add(itemContainer, BorderLayout.CENTER);
 
-		// Make header clickable for collapse/expand
+		// Setup drag and drop for reordering categories
+		setupDragAndDrop();
+
+		// Make header clickable for selection and collapse/expand
 		headerPanel.addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -66,11 +74,20 @@ public class CategoryBox extends JPanel
 				{
 					if (isCollapsed())
 					{
+						// Collapsed → Expand and select
 						expand();
+						parentPanel.setSelectedCategory(categoryName);
+					}
+					else if (isSelected)
+					{
+						// Expanded and selected → Collapse (deselect)
+						collapse();
+						parentPanel.setSelectedCategory(null);
 					}
 					else
 					{
-						collapse();
+						// Expanded but not selected → Just select it
+						parentPanel.setSelectedCategory(categoryName);
 					}
 				}
 			}
@@ -79,6 +96,16 @@ public class CategoryBox extends JPanel
 		// Add context menu for category management
 		final JPopupMenu categoryPopup = new JPopupMenu();
 		categoryPopup.setBorder(new EmptyBorder(5, 5, 5, 5));
+
+		JMenuItem expandItem = new JMenuItem("Expand");
+		expandItem.addActionListener(e -> expand());
+		categoryPopup.add(expandItem);
+
+		JMenuItem collapseItem = new JMenuItem("Collapse");
+		collapseItem.addActionListener(e -> collapse());
+		categoryPopup.add(collapseItem);
+
+		categoryPopup.addSeparator();
 
 		JMenuItem exportCategory = new JMenuItem("Export Category");
 		exportCategory.addActionListener(e -> parentPanel.exportCategory(categoryName));
@@ -89,6 +116,20 @@ public class CategoryBox extends JPanel
 		categoryPopup.add(importCategory);
 
 		categoryPopup.addSeparator();
+
+		JMenuItem renameCategory = new JMenuItem("Rename Category");
+		renameCategory.addActionListener(e -> {
+			plugin.getClientUi().requestFocus();
+			chatboxPanelManager.openTextInput("Enter new name for category:")
+				.onDone(newName -> {
+					if (newName != null && !newName.trim().isEmpty())
+					{
+						parentPanel.renameCategory(categoryName, newName.trim());
+					}
+				})
+				.build();
+		});
+		categoryPopup.add(renameCategory);
 
 		JMenuItem deleteCategory = new JMenuItem("Delete Category");
 		deleteCategory.addActionListener(e -> {
@@ -120,7 +161,6 @@ public class CategoryBox extends JPanel
 		{
 			itemContainer.setVisible(true);
 			applyDimmer(true, headerPanel);
-			parentPanel.setSelectedCategory(categoryName);
 			parentPanel.revalidate();
 			parentPanel.repaint();
 		}
@@ -129,6 +169,38 @@ public class CategoryBox extends JPanel
 	public boolean isCollapsed()
 	{
 		return !itemContainer.isVisible();
+	}
+
+	public void setSelected(boolean selected)
+	{
+		this.isSelected = selected;
+		updateBorder();
+	}
+
+	public boolean isSelected()
+	{
+		return isSelected;
+	}
+
+	private void updateBorder()
+	{
+		if (isSelected)
+		{
+			// Selected category has a colored border
+			headerPanel.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(255, 144, 64)), // Orange left border
+				new EmptyBorder(7, 7, 7, 7)
+			));
+			headerPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		}
+		else
+		{
+			// Non-selected category has default appearance
+			headerPanel.setBorder(new EmptyBorder(7, 7, 7, 7));
+			headerPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR.darker());
+		}
+		headerPanel.revalidate();
+		headerPanel.repaint();
 	}
 
 	private void applyDimmer(boolean brighten, JPanel panel)
@@ -347,4 +419,104 @@ public class CategoryBox extends JPanel
 		tooltip.append("</html>");
 		return tooltip.toString();
 	}
+
+	private void setupDragAndDrop()
+	{
+		// Make the header panel draggable
+		headerPanel.setTransferHandler(new TransferHandler("text")
+		{
+			@Override
+			public int getSourceActions(JComponent c)
+			{
+				return MOVE;
+			}
+
+			@Override
+			protected Transferable createTransferable(JComponent c)
+			{
+				return new StringSelection(categoryName);
+			}
+		});
+
+		// Enable drag gesture
+		headerPanel.addMouseMotionListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseDragged(MouseEvent e)
+			{
+				JComponent comp = (JComponent) e.getSource();
+				TransferHandler handler = comp.getTransferHandler();
+				handler.exportAsDrag(comp, e, TransferHandler.MOVE);
+			}
+		});
+
+		// Create a shared drop handler for better responsiveness
+		DropTargetAdapter dropHandler = new DropTargetAdapter()
+		{
+			@Override
+			public void drop(DropTargetDropEvent dtde)
+			{
+				try
+				{
+					dtde.acceptDrop(DnDConstants.ACTION_MOVE);
+					String draggedCategoryName = (String) dtde.getTransferable().getTransferData(DataFlavor.stringFlavor);
+
+					// Don't drop on self
+					if (!draggedCategoryName.equals(categoryName))
+					{
+						// Get the index of this category
+						List<String> order = plugin.getCategoryOrder();
+						int targetIndex = order.indexOf(categoryName);
+
+						// Move the dragged category to this position
+						if (targetIndex >= 0)
+						{
+							plugin.moveCategoryOrder(draggedCategoryName, targetIndex);
+						}
+					}
+
+					dtde.dropComplete(true);
+				}
+				catch (Exception e)
+				{
+					dtde.dropComplete(false);
+				}
+				finally
+				{
+					// Restore border
+					setBorder(new EmptyBorder(5, 0, 0, 0));
+					headerPanel.setBorder(new EmptyBorder(7, 7, 7, 7));
+				}
+			}
+
+			@Override
+			public void dragOver(DropTargetDragEvent dtde)
+			{
+				// Visual feedback - highlight border when dragging over
+				setBorder(BorderFactory.createCompoundBorder(
+					BorderFactory.createLineBorder(new Color(255, 144, 64), 2),
+					new EmptyBorder(3, 0, 0, 0)
+				));
+				// Also highlight the header
+				headerPanel.setBorder(BorderFactory.createCompoundBorder(
+					new EmptyBorder(0, 0, 0, 0),
+					new EmptyBorder(7, 7, 7, 7)
+				));
+			}
+
+			@Override
+			public void dragExit(DropTargetEvent dte)
+			{
+				// Remove highlight when drag exits
+				setBorder(new EmptyBorder(5, 0, 0, 0));
+				headerPanel.setBorder(new EmptyBorder(7, 7, 7, 7));
+			}
+		};
+
+		// Setup drop target on both the category box AND the header panel
+		// This ensures collapsed categories are easy to target
+		new DropTarget(this, dropHandler);
+		new DropTarget(headerPanel, dropHandler);
+	}
 }
+

@@ -49,6 +49,8 @@ public class ContainerTracker
 	public static final Container SEED_VAULT = new Container(626, "Seed Vault", "trackSeedVault");
 	public static final Container GRAVESTONE = new Container(525, "Gravestone", "trackGravestone");
 	public static final Container GROUP_STORAGE = new Container(659, "Group storage", "trackGroupStorage");
+	public static final Container LOOTING_BAG = new Container(516, "Looting Bag", "trackLootingBag");
+	public static final Container POTION_STORAGE = new Container(-420, "Potion Storage", "trackPotionStorage"); // Fake ID - no real container
 	public static final Container BOAT_1 = new Container(963, "Boat 1", "trackBoatInventory");
 	public static final Container BOAT_1_ALT = new Container(33731, "Boat 1", "trackBoatInventory"); // Alternate ID
 	public static final Container BOAT_2 = new Container(964, "Boat 2", "trackBoatInventory");
@@ -72,6 +74,8 @@ public class ContainerTracker
 		registerContainer(SEED_VAULT);
 		registerContainer(GRAVESTONE);
 		registerContainer(GROUP_STORAGE);
+		registerContainer(LOOTING_BAG);
+		registerContainer(POTION_STORAGE);
 		registerContainer(BOAT_1);
 		registerContainer(BOAT_1_ALT);
 		registerContainer(BOAT_2);

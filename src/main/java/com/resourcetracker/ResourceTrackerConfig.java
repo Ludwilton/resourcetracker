@@ -59,11 +59,31 @@ public interface ResourceTrackerConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "trackLootingBag",
+		name = "Track Looting Bag",
+		description = "Track items in your Looting Bag"
+	)
+	default boolean trackLootingBag()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "trackBoatInventory",
 		name = "Track Boat Inventory",
 		description = "Track items in your Sailing boats"
 	)
 	default boolean trackBoatInventory()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "trackPotionStorage",
+		name = "Track Potion Storage",
+		description = "Track potions in your Potion Storage (Bank tab)"
+	)
+	default boolean trackPotionStorage()
 	{
 		return true;
 	}

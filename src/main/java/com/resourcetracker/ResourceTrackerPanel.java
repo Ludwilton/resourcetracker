@@ -104,8 +104,9 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     private final List<TrackedItem> trackedItems = new CopyOnWriteArrayList<>();
     private final List<CategoryBox> categoryBoxes = new ArrayList<>();
     private String selectedCategory = null;
-    private static final int MAX_SEARCH_RESULTS = 30;
+    private static final int MAX_SEARCH_RESULTS = 50;
     private Timer searchDebounceTimer;
+
 
     public ResourceTrackerPanel(ResourceTrackerPlugin plugin, ItemManager itemManager, ChatboxPanelManager chatboxPanelManager)
     {
@@ -195,8 +196,9 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         searchBar.setPreferredSize(new Dimension(0, 30));
         searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-        searchBar.setEnabled(true);
-        searchBar.setToolTipText("Create/select a category to add items");
+        searchBar.setEnabled(false); // Disabled by default - only enabled when a category is selected
+        searchBar.setEditable(false); // Prevent typing when disabled
+        searchBar.setToolTipText("Select a category to add items");
         searchBar.getDocument().addDocumentListener(new DocumentListener()
         {
             @Override
@@ -343,8 +345,9 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         SwingUtilities.invokeLater(() -> {
             trackedItems.clear();
             selectedCategory = null;
-            searchBar.setEnabled(true);
-            searchBar.setToolTipText("Create or select a category to add items");
+            searchBar.setEnabled(false); // No category selected, so disable search
+            searchBar.setEditable(false); // Prevent typing when disabled
+            searchBar.setToolTipText("Select a category to add items");
 
             categoryNameField.setText("Add category...");
             categoryNameField.setForeground(Color.GRAY);
@@ -360,18 +363,39 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void setSelectedCategory(String category)
     {
-        // Close all other categories, open this one
+        // Mark the selected category (for adding items), don't collapse others
         selectedCategory = category;
-        searchBar.setEnabled(true); // Enable search when category is selected
 
-        // Update search bar placeholder/tooltip
-        searchBar.setToolTipText("Search items to add to " + category);
-
-        for (CategoryBox box : categoryBoxes)
+        if (category == null)
         {
-            if (!box.getCategoryName().equals(category) && !box.isCollapsed())
+            // Deselect all
+            searchBar.setEnabled(false);
+            searchBar.setEditable(false); // Prevent typing when disabled
+            searchBar.setText(""); // Clear search text when deselecting
+            searchBar.setToolTipText("Select a category to add items");
+
+            for (CategoryBox box : categoryBoxes)
             {
-                box.collapse();
+                box.setSelected(false);
+            }
+
+            // Show tracked items view (not search results)
+            contentWrapper.removeAll();
+            contentWrapper.add(itemScrollPane, BorderLayout.CENTER);
+            contentWrapper.revalidate();
+            contentWrapper.repaint();
+        }
+        else
+        {
+            // Select specific category
+            searchBar.setEnabled(true);
+            searchBar.setEditable(true); // Allow typing when enabled
+            searchBar.setToolTipText("Search items to add to " + category);
+
+            // Update visual selection state for all categories
+            for (CategoryBox box : categoryBoxes)
+            {
+                box.setSelected(box.getCategoryName().equals(category));
             }
         }
     }
@@ -385,15 +409,59 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
         itemsToRemove.forEach(item -> plugin.removeTrackedItem(item.getItemId()));
 
+        // Remove from category order
+        plugin.removeCategory(categoryName);
+
         // Clear selected category if it's the one being deleted
         if (categoryName.equals(selectedCategory))
         {
             selectedCategory = null;
-            searchBar.setEnabled(true);
-            searchBar.setToolTipText("Create or select a category to add items");
+            searchBar.setEnabled(false); // No category selected after deletion
+            searchBar.setEditable(false); // Prevent typing when disabled
+            searchBar.setToolTipText("Select a category to add items");
         }
 
         rebuildTrackedItems();
+    }
+
+    public void renameCategory(String oldName, String newName)
+    {
+        // Validate new name
+        if (newName == null || newName.trim().isEmpty())
+        {
+            plugin.sendChatMessage("Category name cannot be empty.");
+            return;
+        }
+
+        String trimmedNewName = newName.trim();
+
+        // Check if a category with the new name already exists
+        boolean exists = plugin.getTrackedItems().values().stream()
+                .anyMatch(item -> item.getCategory().equalsIgnoreCase(trimmedNewName) && !item.getCategory().equals(oldName));
+
+        if (exists)
+        {
+            plugin.sendChatMessage("A category with that name already exists.");
+            return;
+        }
+
+        // Update all items in the category to use the new name
+        plugin.getTrackedItems().values().stream()
+                .filter(item -> item.getCategory().equals(oldName))
+                .forEach(item -> item.setCategory(trimmedNewName));
+
+        // Update the category order tracking
+        plugin.renameCategory(oldName, trimmedNewName);
+
+        // Update selected category if it was the renamed one
+        if (oldName.equals(selectedCategory))
+        {
+            selectedCategory = trimmedNewName;
+            searchBar.setToolTipText("Search items to add to " + trimmedNewName);
+        }
+
+        rebuildTrackedItems();
+        plugin.sendChatMessage("Category renamed to '" + trimmedNewName + "'.");
     }
 
     public void exportCategory(String categoryName)
@@ -517,9 +585,13 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             return; // Silently ignore duplicates
         }
 
+        // Register the category in the plugin's order tracking
+        plugin.registerCategory(trimmedCategoryName);
+
         // Set as selected and focus search
         selectedCategory = trimmedCategoryName;
         searchBar.setEnabled(true);
+        searchBar.setEditable(true); // Allow typing when enabled
         searchBar.requestFocusInWindow();
 
         // Force rebuild to show the empty category
@@ -582,7 +654,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
         String lowerQuery = query.toLowerCase();
 
-        // Use ItemManager to search for items
+        // Use ItemManager to search for items (tradeable items only)
         List<ItemDefinition> results = itemManager.search(query).stream()
                 .filter(itemPrice -> {
                     String itemName = itemPrice.getName().toLowerCase();
@@ -598,6 +670,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }).thenComparing(item -> item.getName().length()))
                 .limit(MAX_SEARCH_RESULTS)
                 .collect(Collectors.toList());
+
 
         for (ItemDefinition item : results)
         {
@@ -752,6 +825,13 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     {
         SwingUtilities.invokeLater(() ->
         {
+            // Save the current expanded/collapsed state of each category before clearing
+            java.util.Map<String, Boolean> expandedStates = new java.util.HashMap<>();
+            for (CategoryBox box : categoryBoxes)
+            {
+                expandedStates.put(box.getCategoryName(), !box.isCollapsed());
+            }
+
             SwingUtil.fastRemoveAll(itemListPanel);
             categoryBoxes.clear();
 
@@ -770,15 +850,21 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             java.util.Map<String, List<TrackedItem>> itemsByCategory = items.stream()
                     .collect(Collectors.groupingBy(TrackedItem::getCategory));
 
-            // Use a LinkedHashSet to preserve insertion order
-            java.util.Set<String> categoryNames = new java.util.LinkedHashSet<>();
-            for (TrackedItem item : items)
+            // Use plugin's category order for consistent ordering
+            List<String> categoryNames = new ArrayList<>(plugin.getCategoryOrder());
+
+            // Add any categories from items that aren't in the order yet (shouldn't happen but safety check)
+            for (String category : itemsByCategory.keySet())
             {
-                categoryNames.add(item.getCategory());
+                if (!categoryNames.contains(category))
+                {
+                    categoryNames.add(category);
+                    plugin.registerCategory(category);
+                }
             }
 
             // Add the currently selected (potentially new and empty) category to the end
-            if (selectedCategory != null && !selectedCategory.isEmpty())
+            if (selectedCategory != null && !selectedCategory.isEmpty() && !categoryNames.contains(selectedCategory))
             {
                 categoryNames.add(selectedCategory);
             }
@@ -799,13 +885,36 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
             for (CategoryBox box : categoryBoxes)
             {
-                if (box.getCategoryName().equals(selectedCategory))
+                boolean isThisSelected = box.getCategoryName().equals(selectedCategory);
+
+                // Set selected state for visual indicator
+                box.setSelected(isThisSelected);
+
+                // Restore expanded/collapsed state, or expand if it's a new category and selected
+                Boolean wasExpanded = expandedStates.get(box.getCategoryName());
+                if (wasExpanded != null)
                 {
-                    box.expand();
+                    // Restore previous state
+                    if (wasExpanded)
+                    {
+                        box.expand();
+                    }
+                    else
+                    {
+                        box.collapse();
+                    }
                 }
                 else
                 {
-                    box.collapse();
+                    // New category - expand only if selected
+                    if (isThisSelected)
+                    {
+                        box.expand();
+                    }
+                    else
+                    {
+                        box.collapse();
+                    }
                 }
             }
 
