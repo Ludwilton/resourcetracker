@@ -69,12 +69,13 @@ public class ResourceTrackerPlugin extends Plugin
         @Inject
         private Client client;
 
-        @Inject
-        private ClientThread clientThread;
+	@Inject
+	@Getter
+	private ClientThread clientThread;
 
-        @Inject
-        @Getter
-        private Gson gson;
+	@Inject
+	@Getter
+	private Gson gson;
 
         @Inject
         @Getter
@@ -160,13 +161,33 @@ public class ResourceTrackerPlugin extends Plugin
 		}
 	}
 
-        public void sendChatMessage(String message)
-        {
-                chatMessageManager.queue(QueuedMessage.builder()
-                        .type(ChatMessageType.CONSOLE)
-                        .runeLiteFormattedMessage(message)
-                        .build());
-        }
+	public void sendChatMessage(String message)
+	{
+		chatMessageManager.queue(QueuedMessage.builder()
+			.type(ChatMessageType.CONSOLE)
+			.runeLiteFormattedMessage(message)
+			.build());
+	}
+
+	public void resetAllData()
+	{
+		// Clear in-memory data
+		trackedItems.clear();
+		categoryOrder.clear();
+		containerCaches.clear();
+
+		// Clear from config
+		configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+		configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", "");
+
+		// Reset the panel UI
+		SwingUtilities.invokeLater(() -> {
+			panel.resetPanel();
+			sendChatMessage("All tracked items and categories have been reset.");
+		});
+
+		log.info("Reset all tracked items and categories");
+	}
 
 	@SuppressWarnings("unused")
 	@Subscribe
@@ -199,8 +220,8 @@ public class ResourceTrackerPlugin extends Plugin
 				return config.trackInventory();
 			case "trackSeedVault":
 				return config.trackSeedVault();
-			case "trackGravestone":
-				return config.trackGravestone();
+			case "trackRetrievalService":
+				return config.trackRetrievalService();
 			case "trackGroupStorage":
 				return config.trackGroupStorage();
 			case "trackLootingBag":
@@ -209,6 +230,8 @@ public class ResourceTrackerPlugin extends Plugin
 				return config.trackPotionStorage();
 			case "trackBoatInventory":
 				return config.trackBoatInventory();
+            case "trackPOHStorage":
+                return config.trackPOHStorage();
 			default:
 				return false;
 		}
@@ -638,6 +661,17 @@ public class ResourceTrackerPlugin extends Plugin
 					{
 						item.setCategory("Default");
 					}
+
+					// Fetch and set prices if not already set (for backwards compatibility)
+					if (item.getGePrice() == 0)
+					{
+						item.setGePrice(itemManager.getItemPrice(item.getItemId()));
+					}
+					if (item.getHaPrice() == 0)
+					{
+						item.setHaPrice(itemManager.getItemComposition(item.getItemId()).getHaPrice());
+					}
+
 					trackedItems.put(item.getItemId(), item);
 
 					// Register category if not already in order

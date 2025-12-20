@@ -14,6 +14,8 @@ public class TrackedItem
 	private String category;
 	private Integer goalAmount;
 	private Map<String, Integer> containerQuantities = new HashMap<>();
+	private int gePrice; // Grand Exchange price
+	private int haPrice; // High Alchemy price
 
 	// No-argument constructor for Gson deserialization
 	public TrackedItem()
@@ -36,4 +38,13 @@ public class TrackedItem
 		this.containerQuantities = (containerQuantities == null) ? new HashMap<>() : containerQuantities;
 	}
 
+	public long getTotalGePrice()
+	{
+		return (long) gePrice * currentAmount;
+	}
+
+	public long getTotalHaPrice()
+	{
+		return (long) haPrice * currentAmount;
+	}
 }

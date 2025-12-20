@@ -117,6 +117,16 @@ public class CategoryBox extends JPanel
 
 		categoryPopup.addSeparator();
 
+		JMenuItem resetCounts = new JMenuItem("Reset Item Counts");
+		resetCounts.addActionListener(e -> {
+			plugin.getClientUi().requestFocus();
+			chatboxPanelManager.openTextMenuInput("Reset all item counts for '" + categoryName + "'?")
+				.option("Yes", () -> parentPanel.resetCategoryCounts(categoryName))
+				.option("No", () -> {})
+				.build();
+		});
+		categoryPopup.add(resetCounts);
+
 		JMenuItem renameCategory = new JMenuItem("Rename Category");
 		renameCategory.addActionListener(e -> {
 			plugin.getClientUi().requestFocus();
@@ -404,9 +414,39 @@ public class CategoryBox extends JPanel
 	{
 		StringBuilder tooltip = new StringBuilder("<html><b>").append(item.getItemName()).append("</b>");
 
+		int quantity = item.getCurrentAmount();
+		if (quantity > 0)
+		{
+			tooltip.append(" x ").append(QuantityFormatter.formatNumber(quantity));
+		}
+
+		// Add GE price if available
+		if (item.getGePrice() > 0)
+		{
+			long totalGePrice = item.getTotalGePrice();
+			tooltip.append("<br>GE: ").append(QuantityFormatter.formatNumber(totalGePrice));
+			if (quantity > 1)
+			{
+				tooltip.append(" (").append(QuantityFormatter.formatNumber(item.getGePrice())).append(" ea)");
+			}
+		}
+
+		// Add HA price if available (skip for coins and platinum tokens)
+		if (item.getHaPrice() > 0 && item.getItemId() != 995 && item.getItemId() != 13204)
+		{
+			long totalHaPrice = item.getTotalHaPrice();
+			tooltip.append("<br>HA: ").append(QuantityFormatter.formatNumber(totalHaPrice));
+			if (quantity > 1)
+			{
+				tooltip.append(" (").append(QuantityFormatter.formatNumber(item.getHaPrice())).append(" ea)");
+			}
+		}
+
+		// Add container breakdown
 		Map<String, Integer> containers = item.getContainerQuantities();
 		if (containers != null && !containers.isEmpty())
 		{
+			tooltip.append("<br><br><b>Locations:</b>");
 			containers.entrySet().stream()
 				.filter(e -> e.getValue() > 0)
 				.sorted(Map.Entry.comparingByKey())

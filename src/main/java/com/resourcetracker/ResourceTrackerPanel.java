@@ -421,11 +421,32 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             searchBar.setToolTipText("Select a category to add items");
         }
 
-        rebuildTrackedItems();
-    }
+		rebuildTrackedItems();
+	}
 
-    public void renameCategory(String oldName, String newName)
-    {
+	public void resetCategoryCounts(String categoryName)
+	{
+		// Get all items in this category and reset their counts
+		plugin.getTrackedItems().values().stream()
+			.filter(item -> item.getCategory().equals(categoryName))
+			.forEach(item -> {
+				// Reset current amount to 0
+				item.setCurrentAmount(0);
+				// Clear all container quantities
+				item.getContainerQuantities().clear();
+			});
+
+		// Save the changes
+		plugin.saveData();
+
+		// Rebuild UI to show the reset counts
+		rebuildTrackedItems();
+
+		plugin.sendChatMessage("All item counts reset for category '" + categoryName + "'.");
+	}
+
+	public void renameCategory(String oldName, String newName)
+	{
         // Validate new name
         if (newName == null || newName.trim().isEmpty())
         {
@@ -708,6 +729,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
         JLabel iconLabel = new JLabel();
         iconLabel.setPreferredSize(new Dimension(36, 32));
+        iconLabel.setToolTipText(itemDef.getName()); // Show full item name on hover
         AsyncBufferedImage itemImage = itemManager.getImage(itemDef.getId());
         if (itemImage != null)
         {
@@ -787,20 +809,32 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }
 
                 // If not tracked, add as a new item
-                if (selectedCategory == null || selectedCategory.isEmpty())
-                {
-                    return; // Should not happen
-                }
+			if (selectedCategory == null || selectedCategory.isEmpty())
+			{
+				return; // Should not happen
+			}
 
-                TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
-                addTrackedItem(newItem);
-                clearSearchAndRebuild();
-            }
-            catch (NumberFormatException ex)
-            {
-                plugin.sendChatMessage("Please enter a valid number.");
-            }
-        });
+			TrackedItem newItem = new TrackedItem(itemDef.getId(), itemDef.getName(), goal, selectedCategory);
+
+			// Fetch and set GE and HA prices on client thread
+			plugin.getClientThread().invoke(() -> {
+				int gePrice = itemManager.getItemPrice(itemDef.getId());
+				int haPrice = itemManager.getItemComposition(itemDef.getId()).getHaPrice();
+				newItem.setGePrice(gePrice);
+				newItem.setHaPrice(haPrice);
+
+				// Add the item after prices are fetched
+				SwingUtilities.invokeLater(() -> {
+					addTrackedItem(newItem);
+					clearSearchAndRebuild();
+				});
+			});
+		}
+		catch (NumberFormatException ex)
+		{
+			plugin.sendChatMessage("Please enter a valid number.");
+		}
+	});
 
         rightPanel.add(goalField);
         rightPanel.add(addButton);

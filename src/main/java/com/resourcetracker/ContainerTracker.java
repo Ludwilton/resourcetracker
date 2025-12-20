@@ -47,7 +47,7 @@ public class ContainerTracker
 	public static final Container BANK = new Container(95, "Bank", "trackBank");
 	public static final Container INVENTORY = new Container(93, "Inventory", "trackInventory");
 	public static final Container SEED_VAULT = new Container(626, "Seed Vault", "trackSeedVault");
-	public static final Container GRAVESTONE = new Container(525, "Gravestone", "trackGravestone");
+	public static final Container RETRIEVAL_SERVICE = new Container(525, "Retrieval Service", "trackRetrievalService");
 	public static final Container GROUP_STORAGE = new Container(659, "Group storage", "trackGroupStorage");
 	public static final Container LOOTING_BAG = new Container(516, "Looting Bag", "trackLootingBag");
 	public static final Container POTION_STORAGE = new Container(-420, "Potion Storage", "trackPotionStorage"); // Fake ID - no real container
@@ -61,6 +61,7 @@ public class ContainerTracker
 	public static final Container BOAT_4_ALT = new Container(33734, "Boat 4", "trackBoatInventory"); // Alternate ID
 	public static final Container BOAT_5 = new Container(967, "Boat 5", "trackBoatInventory");
 	public static final Container BOAT_5_ALT = new Container(33735, "Boat 5", "trackBoatInventory"); // Alternate ID
+	public static final Container POH_STORAGE = new Container(33405, "POH Storage", "trackPOHStorage");
 
 	// Map for quick lookup by ID
 	private static final Map<Integer, Container> CONTAINER_BY_ID = new HashMap<>();
@@ -72,7 +73,7 @@ public class ContainerTracker
 		registerContainer(BANK);
 		registerContainer(INVENTORY);
 		registerContainer(SEED_VAULT);
-		registerContainer(GRAVESTONE);
+		registerContainer(RETRIEVAL_SERVICE);
 		registerContainer(GROUP_STORAGE);
 		registerContainer(LOOTING_BAG);
 		registerContainer(POTION_STORAGE);
@@ -86,6 +87,7 @@ public class ContainerTracker
 		registerContainer(BOAT_4_ALT);
 		registerContainer(BOAT_5);
 		registerContainer(BOAT_5_ALT);
+        registerContainer(POH_STORAGE);
 	}
 
 	private static void registerContainer(Container container)
