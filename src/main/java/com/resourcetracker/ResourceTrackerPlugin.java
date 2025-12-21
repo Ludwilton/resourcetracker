@@ -112,6 +112,14 @@ public class ResourceTrackerPlugin extends Plugin
     // Potion storage tracking
     private boolean rebuildPotions = false;
     private Set<Integer> potionStoreVars;
+    private boolean potionRebuildInProgress = false;
+
+    // Account tracking
+    private String currentAccountHash = null;
+
+    // Update debouncing
+    private boolean updatePending = false;
+    private final Object updateLock = new Object();
 
     @Override
     protected void startUp()
@@ -142,12 +150,37 @@ public class ResourceTrackerPlugin extends Plugin
         clientToolbar.removeNavigation(navButton);
     }
 
+    private String getAccountHash()
+    {
+        if (client.getAccountHash() != -1)
+        {
+            return String.valueOf(client.getAccountHash());
+        }
+        return null;
+    }
+
     @SuppressWarnings("unused")
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
         if (event.getGameState() == GameState.LOGGED_IN)
         {
+            String newAccountHash = getAccountHash();
+
+            // Check if we switched accounts
+            if (currentAccountHash != null && !currentAccountHash.equals(newAccountHash))
+            {
+                log.info("Account changed - clearing cached data");
+                // Clear in-memory data from previous account
+                trackedItems.clear();
+                categoryOrder.clear();
+                containerCaches.clear();
+                inventoryOnlyCategories.clear();
+            }
+
+            currentAccountHash = newAccountHash;
+            log.info("Logged in as account hash: {}", currentAccountHash);
+
             // Load tracked items when player logs in
             loadData();
 
@@ -170,6 +203,8 @@ public class ResourceTrackerPlugin extends Plugin
             saveData();
             // Clear panel when logging out
             panel.resetPanel();
+
+            log.info("Logged out from account hash: {}", currentAccountHash);
         }
     }
 
@@ -193,6 +228,8 @@ public class ResourceTrackerPlugin extends Plugin
         configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
         configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", "");
         configManager.setRSProfileConfiguration("resourcetracker", "invOnlyCategories", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", "");
 
         // Reset the panel UI
         SwingUtilities.invokeLater(() -> {
@@ -326,10 +363,7 @@ public class ResourceTrackerPlugin extends Plugin
             Map<String, Integer> savedBreakdown = trackedItem.getContainerQuantities();
             boolean hasScannedData = false;
 
-            // NEW: Check if this item is restricted to inventory only
-            // It is restricted if:
-            // 1. The Category it belongs to is in the set
-            // 2. OR the Item itself is toggled to inventory only
+            // Check if this item is restricted to inventory only
             boolean isRestrictedToInventory = inventoryOnlyCategories.contains(trackedItem.getCategory()) || trackedItem.isInventoryOnly();
 
             // Track which normalized cache IDs we've already processed to avoid double-counting
@@ -338,7 +372,7 @@ public class ResourceTrackerPlugin extends Plugin
             // Dynamically check all registered containers
             for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
             {
-                // NEW: If restricted, skip any container that isn't inventory (ID 93)
+                // If restricted, skip any container that isn't inventory (ID 93)
                 if (isRestrictedToInventory && container.getId() != 93)
                 {
                     continue;
@@ -385,9 +419,25 @@ public class ResourceTrackerPlugin extends Plugin
             }
         }
 
+        // Only save and rebuild if something actually changed
         if (needsUpdate)
         {
+            synchronized (updateLock)
+            {
+                // If an update is already pending, don't schedule another one
+                if (updatePending)
+                {
+                    return;
+                }
+                updatePending = true;
+            }
+
+            // Use invokeLater to batch UI updates and prevent multiple rapid rebuilds
             SwingUtilities.invokeLater(() -> {
+                synchronized (updateLock)
+                {
+                    updatePending = false;
+                }
                 saveData();
                 panel.rebuild();
             });
@@ -472,10 +522,14 @@ public class ResourceTrackerPlugin extends Plugin
     @Subscribe
     public void onClientTick(ClientTick event)
     {
-        if (rebuildPotions)
+        if (rebuildPotions && !potionRebuildInProgress)
         {
+            potionRebuildInProgress = true;
+            rebuildPotions = false; // Clear the flag immediately to prevent double processing
+
             updatePotionStorageCache();
-            rebuildPotions = false;
+
+            potionRebuildInProgress = false;
 
             // Cache the varbits that trigger potion store rebuilds (only do this once)
             Widget w = client.getWidget(InterfaceID.Bankmain.POTIONSTORE_ITEMS);
@@ -497,6 +551,8 @@ public class ResourceTrackerPlugin extends Plugin
     {
         if (potionStoreVars != null && potionStoreVars.contains(varbitChanged.getVarpId()))
         {
+            // Only set the flag, don't directly call update
+            // This prevents multiple rapid-fire updates
             rebuildPotions = true;
         }
     }
@@ -544,35 +600,74 @@ public class ResourceTrackerPlugin extends Plugin
         int potionStorageId = ContainerTracker.POTION_STORAGE.getId();
         int cacheId = normalizeContainerId(potionStorageId);
         Map<Integer, Integer> cache = containerCaches.computeIfAbsent(cacheId, k -> new HashMap<>());
-        cache.clear();
-        cache.putAll(potionQtyMap);
 
-        log.debug("Updated potion storage cache with {} potion types", potionQtyMap.size());
+        // Check if the cache actually changed before updating
+        boolean cacheChanged = !cache.equals(potionQtyMap);
 
-        // Update tracked items
-        updateTrackedItems();
+        if (cacheChanged)
+        {
+            cache.clear();
+            cache.putAll(potionQtyMap);
+            log.debug("Updated potion storage cache with {} potion types", potionQtyMap.size());
+
+            // Only update tracked items if the cache actually changed
+            updateTrackedItems();
+        }
     }
 
 
     public void saveData()
     {
-        if (trackedItems.isEmpty())
+        // Verify we're logged in before saving
+        String accountHash = getAccountHash();
+        if (accountHash == null)
         {
-            configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
-            configManager.setRSProfileConfiguration("resourcetracker", "invOnlyCategories", "");
-            saveCategoryOrder(); // Still save order even if no items
+            log.warn("Cannot save data - no account logged in");
+            return;
+        }
+
+        if (!accountHash.equals(currentAccountHash))
+        {
+            log.warn("Account mismatch detected - skipping save");
             return;
         }
 
         Gson gson = new Gson();
-        List<TrackedItem> itemList = new ArrayList<>(trackedItems.values());
-        String json = gson.toJson(itemList);
-        log.debug("Saving {} tracked items to config", trackedItems.size());
-        configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+
+        // Save tracked items
+        if (trackedItems.isEmpty())
+        {
+            configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+        }
+        else
+        {
+            List<TrackedItem> itemList = new ArrayList<>(trackedItems.values());
+            String json = gson.toJson(itemList);
+            log.debug("Saving {} tracked items for account {}", trackedItems.size(), accountHash);
+            configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+        }
 
         // Save inventory only categories
-        String invOnlyJson = gson.toJson(inventoryOnlyCategories);
+        String invOnlyJson = inventoryOnlyCategories.isEmpty() ? "" : gson.toJson(inventoryOnlyCategories);
         configManager.setRSProfileConfiguration("resourcetracker", "invOnlyCategories", invOnlyJson);
+        if (!inventoryOnlyCategories.isEmpty())
+        {
+            log.debug("Saved {} inventory-only categories for account {}", inventoryOnlyCategories.size(), accountHash);
+        }
+
+        // Save container caches with timestamp
+        if (containerCaches.isEmpty())
+        {
+            configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", "");
+            configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", "");
+        }
+        else
+        {
+            String cacheJson = gson.toJson(containerCaches);
+            configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", cacheJson);
+            configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", String.valueOf(System.currentTimeMillis()));
+            log.debug("Saved caches for {} containers for account {}", containerCaches.size(), accountHash);
+        }
 
         // Save category order
         saveCategoryOrder();
@@ -580,6 +675,7 @@ public class ResourceTrackerPlugin extends Plugin
 
     private void saveCategoryOrder()
     {
+        Gson gson = new Gson();
         String orderJson = gson.toJson(categoryOrder);
         configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", orderJson);
         log.debug("Saved category order: {}", categoryOrder);
@@ -592,6 +688,7 @@ public class ResourceTrackerPlugin extends Plugin
         {
             try
             {
+                Gson gson = new Gson();
                 Type type = new TypeToken<List<String>>(){}.getType();
                 List<String> loaded = gson.fromJson(orderJson, type);
                 if (loaded != null)
@@ -653,6 +750,17 @@ public class ResourceTrackerPlugin extends Plugin
 
     private void loadData()
     {
+        String accountHash = getAccountHash();
+        if (accountHash == null)
+        {
+            log.warn("Cannot load data - no account logged in");
+            return;
+        }
+
+        log.info("Loading data for account hash: {}", accountHash);
+
+        Gson gson = new Gson();
+
         // Load category order first
         loadCategoryOrder();
 
@@ -666,22 +774,64 @@ public class ResourceTrackerPlugin extends Plugin
                 if (loaded != null) {
                     inventoryOnlyCategories.clear();
                     inventoryOnlyCategories.addAll(loaded);
+                    log.debug("Loaded {} inventory-only categories", inventoryOnlyCategories.size());
                 }
             } catch (Exception e) {
                 log.error("Error loading inventory only categories", e);
             }
         }
 
+        // Load container caches
+        String cacheJson = configManager.getRSProfileConfiguration("resourcetracker", "containerCaches");
+        String timestampStr = configManager.getRSProfileConfiguration("resourcetracker", "cacheTimestamp");
+
+        if (cacheJson != null && !cacheJson.isEmpty())
+        {
+            try {
+                Type type = new TypeToken<Map<Integer, Map<Integer, Integer>>>(){}.getType();
+                Map<Integer, Map<Integer, Integer>> loadedCache = gson.fromJson(cacheJson, type);
+                if (loadedCache != null) {
+                    containerCaches.clear();
+                    containerCaches.putAll(loadedCache);
+
+                    // Check cache age
+                    if (timestampStr != null && !timestampStr.isEmpty())
+                    {
+                        try {
+                            long timestamp = Long.parseLong(timestampStr);
+                            long ageHours = (System.currentTimeMillis() - timestamp) / (1000 * 60 * 60);
+                            log.info("Loaded caches for {} containers (age: {} hours) for account {}",
+                                    containerCaches.size(), ageHours, accountHash);
+
+                            if (ageHours > 24)
+                            {
+                                log.warn("Container cache is {} hours old - data may be stale", ageHours);
+                            }
+                        } catch (NumberFormatException e) {
+                            log.warn("Invalid cache timestamp");
+                        }
+                    }
+                    else
+                    {
+                        log.debug("Loaded caches for {} containers (no timestamp)", containerCaches.size());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Error loading container caches", e);
+                // Clear potentially corrupted cache
+                containerCaches.clear();
+            }
+        }
+
         String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
         if (json == null || json.isEmpty())
         {
-            log.debug("No tracked items to load from config");
+            log.debug("No tracked items to load for account {}", accountHash);
             return;
         }
 
         try
         {
-            Gson gson = new Gson();
             Type type = new TypeToken<List<TrackedItem>>()
             {
             }.getType();
@@ -729,13 +879,18 @@ public class ResourceTrackerPlugin extends Plugin
                 }
             }
 
-            log.debug("Loaded {} tracked items from config", trackedItems.size());
+            // Sync items with the loaded caches immediately
+            updateTrackedItems();
+
+            log.info("Loaded {} tracked items for account {}", trackedItems.size(), accountHash);
             // Initial load of UI
             SwingUtilities.invokeLater(() -> panel.loadItems(trackedItems.values()));
         }
         catch (Exception e)
         {
-            log.error("Error loading tracked items from config", e);
+            log.error("Error loading tracked items from config for account {}", accountHash, e);
+            // On error, clear potentially corrupted data
+            trackedItems.clear();
         }
     }
 

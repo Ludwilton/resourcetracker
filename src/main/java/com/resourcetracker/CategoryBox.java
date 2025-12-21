@@ -118,9 +118,9 @@ public class CategoryBox extends JPanel
         final JPopupMenu categoryPopup = new JPopupMenu();
         categoryPopup.setBorder(new EmptyBorder(5, 5, 5, 5));
 
-        // NEW: Category Mode Toggle
+        // Category Mode Toggle
         boolean isInvOnly = plugin.isCategoryInventoryOnly(categoryName);
-        JMenuItem toggleMode = new JMenuItem(isInvOnly ? "Mode: Track All Containers" : "Mode: Track Inventory Only");
+        JMenuItem toggleMode = new JMenuItem(isInvOnly ? "Track All Containers" : "Track Inventory Only");
         toggleMode.addActionListener(e -> {
             plugin.toggleCategoryInventoryOnly(categoryName);
         });
@@ -189,7 +189,6 @@ public class CategoryBox extends JPanel
         if (!isCollapsed())
         {
             itemContainer.setVisible(false);
-            // applyDimmer(false, headerPanel); // Removed to fix visual glitching with new colors
             parentPanel.revalidate();
             parentPanel.repaint();
         }
@@ -200,7 +199,6 @@ public class CategoryBox extends JPanel
         if (isCollapsed())
         {
             itemContainer.setVisible(true);
-            // applyDimmer(true, headerPanel); // Removed to fix visual glitching with new colors
             parentPanel.revalidate();
             parentPanel.repaint();
         }
@@ -227,15 +225,15 @@ public class CategoryBox extends JPanel
     {
         if (isSelected)
         {
-            // Selected category has a colored border
+            // Selected category has a colored border (Orange left strip)
             headerPanel.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(255, 144, 64)), // Orange left border
+                    BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(255, 144, 64)),
                     new EmptyBorder(7, 7, 7, 7)
             ));
         }
         else
         {
-            // Non-selected category has default appearance
+            // Non-selected category has default border
             headerPanel.setBorder(new EmptyBorder(7, 7, 7, 7));
         }
         headerPanel.revalidate();
@@ -245,16 +243,17 @@ public class CategoryBox extends JPanel
     private void updateHeaderColor()
     {
         boolean isInvOnly = plugin.isCategoryInventoryOnly(categoryName);
-        Color baseColor = isInvOnly ? new Color(60, 45, 30) : ColorScheme.DARKER_GRAY_COLOR.darker();
-        headerPanel.setBackground(isSelected ? ColorScheme.DARKER_GRAY_COLOR : baseColor);
-    }
-
-    private void applyDimmer(boolean brighten, JPanel panel)
-    {
-        for (Component component : panel.getComponents())
+        if (isInvOnly)
         {
-            Color color = component.getForeground();
-            component.setForeground(brighten ? color.brighter() : color.darker());
+            // Use a brownish color for inventory only mode
+            // If selected, use a slightly lighter brown to indicate selection state
+            // while preserving the "inventory only" color cue.
+            headerPanel.setBackground(isSelected ? new Color(75, 55, 40) : new Color(60, 45, 30));
+        }
+        else
+        {
+            // Standard colors: Dark Gray when selected, Darker Gray when not
+            headerPanel.setBackground(isSelected ? ColorScheme.DARKER_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR.darker());
         }
     }
 
@@ -262,7 +261,6 @@ public class CategoryBox extends JPanel
     {
         return categoryName;
     }
-
 
     public void rebuild(List<TrackedItem> items)
     {
@@ -403,7 +401,7 @@ public class CategoryBox extends JPanel
 
         itemContainer.setVisible(true);
 
-        // Calculate rows needed (like LootTracker)
+        // Calculate rows needed
         final int rowSize = ((items.size() % ITEMS_PER_ROW == 0) ? 0 : 1) + items.size() / ITEMS_PER_ROW;
 
         itemContainer.setLayout(new GridLayout(rowSize, ITEMS_PER_ROW, 1, 1));
@@ -431,10 +429,16 @@ public class CategoryBox extends JPanel
         JPanel slotContainer = new JPanel(new BorderLayout());
         slotContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-        // Visual indicator for Inventory Only mode
+        // FIX: Ensure consistent sizing by adding a border in both cases
         if (item.isInventoryOnly())
         {
+            // 1px colored border
             slotContainer.setBorder(BorderFactory.createLineBorder(ColorScheme.PROGRESS_INPROGRESS_COLOR, 1));
+        }
+        else
+        {
+            // 1px transparent border to match size
+            slotContainer.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
         }
 
         JPanel centerPanel = new JPanel(null);
@@ -505,12 +509,12 @@ public class CategoryBox extends JPanel
         editItem.addActionListener(ev -> openEditDialog(item));
         popupMenu.add(editItem);
 
-        // Inventory Only Toggle
-        JMenuItem toggleInvOnly = new JMenuItem(item.isInventoryOnly() ? "Track All" : "Track Inv Only");
+        // Inventory Only Toggle (Item Level)
+        JMenuItem toggleInvOnly = new JMenuItem(item.isInventoryOnly() ? "Track All Inventories" : "Track Inventory Only");
         toggleInvOnly.addActionListener(ev -> {
             item.setInventoryOnly(!item.isInventoryOnly());
             plugin.saveData();
-            plugin.getClientThread().invokeLater(() -> plugin.updateTrackedItems());
+            plugin.updateTrackedItems(); // Force update to refresh count
         });
         popupMenu.add(toggleInvOnly);
 
