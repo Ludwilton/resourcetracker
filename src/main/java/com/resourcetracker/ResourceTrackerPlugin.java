@@ -632,7 +632,6 @@ public class ResourceTrackerPlugin extends Plugin
             return;
         }
 
-        Gson gson = new Gson();
 
         // Save tracked items
         if (trackedItems.isEmpty())
@@ -675,7 +674,6 @@ public class ResourceTrackerPlugin extends Plugin
 
     private void saveCategoryOrder()
     {
-        Gson gson = new Gson();
         String orderJson = gson.toJson(categoryOrder);
         configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", orderJson);
         log.debug("Saved category order: {}", categoryOrder);
@@ -688,7 +686,6 @@ public class ResourceTrackerPlugin extends Plugin
         {
             try
             {
-                Gson gson = new Gson();
                 Type type = new TypeToken<List<String>>(){}.getType();
                 List<String> loaded = gson.fromJson(orderJson, type);
                 if (loaded != null)
@@ -759,7 +756,6 @@ public class ResourceTrackerPlugin extends Plugin
 
         log.info("Loading data for account hash: {}", accountHash);
 
-        Gson gson = new Gson();
 
         // Load category order first
         loadCategoryOrder();
