@@ -112,4 +112,33 @@ public interface ResourceTrackerConfig extends Config
     {
         return true;
     }
+
+	@ConfigSection(
+		name = "Display",
+		description = "Configure display options",
+		position = 1
+	)
+	String displaySection = "display";
+
+	@ConfigItem(
+		keyName = "showCategoryTotals",
+		name = "Show Category Totals",
+		description = "Show total current/goal amounts in category headers",
+		section = displaySection
+	)
+	default boolean showCategoryTotals()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showCategoryProgress",
+		name = "Show Category Progress",
+		description = "Show progress bar in category headers",
+		section = displaySection
+	)
+	default boolean showCategoryProgress()
+	{
+		return true;
+	}
 }

@@ -322,9 +322,9 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         plugin.addTrackedItem(item);
     }
 
-    public void removeTrackedItem(int itemId)
+    public void removeTrackedItem(int itemId, String category)
     {
-        plugin.removeTrackedItem(itemId);
+        plugin.removeTrackedItem(itemId, category);
     }
 
 
@@ -407,7 +407,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 .filter(item -> item.getCategory().equals(categoryName))
                 .collect(Collectors.toList());
 
-        itemsToRemove.forEach(item -> plugin.removeTrackedItem(item.getItemId()));
+        itemsToRemove.forEach(item -> plugin.removeTrackedItem(item.getItemId(), item.getCategory()));
 
         // Remove from category order
         plugin.removeCategory(categoryName);
@@ -580,7 +580,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 // Reset current amount, as it's based on container state
                 importedItem.setCurrentAmount(0);
                 // Remove existing item if present before adding the new one
-                plugin.removeTrackedItem(importedItem.getItemId());
+                plugin.removeTrackedItem(importedItem.getItemId(), targetCategory);
                 plugin.addTrackedItem(importedItem);
             }
         }
@@ -799,7 +799,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }
 
                 // Check if already tracked in the current category, if so, update it
-                TrackedItem existing = plugin.getTrackedItems().get(itemDef.getId());
+                TrackedItem existing = plugin.getTrackedItems().get(itemDef.getId() + ":" + selectedCategory);
                 if (existing != null && existing.getCategory().equals(selectedCategory))
                 {
                     existing.setGoalAmount(goal);

@@ -7,44 +7,45 @@ import java.util.Map;
 @Data
 public class TrackedItem
 {
-	private int itemId;
-	private String itemName;
-	private int startingAmount;
-	private int currentAmount;
-	private String category;
-	private Integer goalAmount;
-	private Map<String, Integer> containerQuantities = new HashMap<>();
-	private int gePrice; // Grand Exchange price
-	private int haPrice; // High Alchemy price
+    private int itemId;
+    private String itemName;
+    private int startingAmount;
+    private int currentAmount;
+    private String category;
+    private Integer goalAmount;
+    private Map<String, Integer> containerQuantities = new HashMap<>();
+    private int gePrice; // Grand Exchange price
+    private int haPrice; // High Alchemy price
+    private boolean inventoryOnly = false;
 
-	// No-argument constructor for Gson deserialization
-	public TrackedItem()
-	{
-		this.containerQuantities = new HashMap<>();
-	}
+    // No-argument constructor for Gson deserialization
+    public TrackedItem()
+    {
+        this.containerQuantities = new HashMap<>();
+    }
 
-	public TrackedItem(int itemId, String itemName, Integer goalAmount, String category)
-	{
-		this.itemId = itemId;
-		this.itemName = itemName;
-		this.currentAmount = 0;
-		this.goalAmount = goalAmount;
-		this.category = category;
-		this.containerQuantities = new HashMap<>();
-	}
+    public TrackedItem(int itemId, String itemName, Integer goalAmount, String category)
+    {
+        this.itemId = itemId;
+        this.itemName = itemName;
+        this.currentAmount = 0;
+        this.goalAmount = goalAmount;
+        this.category = category;
+        this.containerQuantities = new HashMap<>();
+    }
 
-	public void setContainerQuantities(Map<String, Integer> containerQuantities)
-	{
-		this.containerQuantities = (containerQuantities == null) ? new HashMap<>() : containerQuantities;
-	}
+    public void setContainerQuantities(Map<String, Integer> containerQuantities)
+    {
+        this.containerQuantities = (containerQuantities == null) ? new HashMap<>() : containerQuantities;
+    }
 
-	public long getTotalGePrice()
-	{
-		return (long) gePrice * currentAmount;
-	}
+    public long getTotalGePrice()
+    {
+        return (long) gePrice * currentAmount;
+    }
 
-	public long getTotalHaPrice()
-	{
-		return (long) haPrice * currentAmount;
-	}
+    public long getTotalHaPrice()
+    {
+        return (long) haPrice * currentAmount;
+    }
 }
