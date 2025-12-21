@@ -5,23 +5,33 @@ import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.EnumComposition;
+import net.runelite.api.EnumID;
 import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.ScriptID;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.client.game.chatbox.ChatboxPanelManager;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
-import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.ChatMessageType;
 
 import javax.inject.Inject;
@@ -29,6 +39,9 @@ import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,173 +54,850 @@ import java.util.Map;
 )
 public class ResourceTrackerPlugin extends Plugin
 {
-        @Inject
-        private ClientToolbar clientToolbar;
+    @Inject
+    private ClientToolbar clientToolbar;
 
-        @Inject
-        private ItemManager itemManager;
+    @Inject
+    private ItemManager itemManager;
 
-        @Inject
-        private ConfigManager configManager;
+    @Inject
+    private ConfigManager configManager;
 
-        @Inject
-        @Getter
-        private Gson gson;
+    @Inject
+    private ResourceTrackerConfig config;
 
-        @Inject
-        @Getter
-        private ChatboxPanelManager chatboxPanelManager;
+    @Inject
+    private Client client;
 
-        @Inject
-        private ChatMessageManager chatMessageManager;
+    @Inject
+    @Getter
+    private ClientThread clientThread;
 
-        @Inject
-        private net.runelite.client.ui.ClientUI clientUi;
+    @Inject
+    @Getter
+    private Gson gson;
 
-        private ResourceTrackerPanel panel;
-        private NavigationButton navButton;
+    @Inject
+    @Getter
+    private ChatboxPanelManager chatboxPanelManager;
 
-        @Override
-        protected void startUp()
+    @Inject
+    private ChatMessageManager chatMessageManager;
+
+    @Inject
+    @Getter
+    private net.runelite.client.ui.ClientUI clientUi;
+
+    public ResourceTrackerConfig getConfig()
+    {
+        return config;
+    }
+
+    private ResourceTrackerPanel panel;
+    private NavigationButton navButton;
+    private final Map<String, TrackedItem> trackedItems = new HashMap<>();
+
+    // Track category order for consistent display
+    private final List<String> categoryOrder = new ArrayList<>();
+
+    // Track which categories are in Inventory Only mode
+    private final Set<String> inventoryOnlyCategories = new HashSet<>();
+
+    private String getTrackedItemKey(int itemId, String category) {
+        return itemId + ":" + category;
+    }
+    // Dynamic container cache - one map per container ID
+    private final Map<Integer, Map<Integer, Integer>> containerCaches = new HashMap<>();
+
+    // Potion storage tracking
+    private boolean rebuildPotions = false;
+    private Set<Integer> potionStoreVars;
+    private boolean potionRebuildInProgress = false;
+
+    // Account tracking
+    private String currentAccountHash = null;
+
+    // Update debouncing
+    private boolean updatePending = false;
+    private final Object updateLock = new Object();
+
+    @Override
+    protected void startUp()
+    {
+        log.debug("Resource Tracker started");
+
+        panel = new ResourceTrackerPanel(this, itemManager, chatboxPanelManager);
+
+        final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/com/resourcetracker/icon.png");
+
+        navButton = NavigationButton.builder()
+                .tooltip("Resource Tracker")
+                .icon(icon)
+                .priority(5)
+                .panel(panel)
+                .build();
+
+        clientToolbar.addNavigation(navButton);
+
+        loadData();
+    }
+
+    @Override
+    protected void shutDown()
+    {
+        log.debug("Resource Tracker stopped!");
+        saveData();
+        clientToolbar.removeNavigation(navButton);
+    }
+
+    private String getAccountHash()
+    {
+        if (client.getAccountHash() != -1)
         {
-                log.debug("Resource Tracker started");
-
-                panel = new ResourceTrackerPanel(this, itemManager, chatboxPanelManager);
-
-                final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/com/resourcetracker/icon.png");
-
-                navButton = NavigationButton.builder()
-                        .tooltip("Resource Tracker")
-                        .icon(icon)
-                        .priority(5)
-                        .panel(panel)
-                        .build();
-
-                clientToolbar.addNavigation(navButton);
-
-                loadTrackedItems();
+            return String.valueOf(client.getAccountHash());
         }
+        return null;
+    }
 
-        @Override
-        protected void shutDown()
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event)
+    {
+        if (event.getGameState() == GameState.LOGGED_IN)
         {
-                log.debug("Resource Tracker stopped!");
-                saveTrackedItems(panel.getTrackedItems());
-                clientToolbar.removeNavigation(navButton);
-        }
+            String newAccountHash = getAccountHash();
 
-        @SuppressWarnings("unused")
-        @Subscribe
-        public void onGameStateChanged(GameStateChanged event)
-        {
-                if (event.getGameState() == GameState.LOGGED_IN)
+            // Check if we switched accounts
+            if (currentAccountHash != null && !currentAccountHash.equals(newAccountHash))
+            {
+                log.info("Account changed - clearing cached data");
+                // Clear in-memory data from previous account
+                trackedItems.clear();
+                categoryOrder.clear();
+                containerCaches.clear();
+                inventoryOnlyCategories.clear();
+            }
+
+            currentAccountHash = newAccountHash;
+            log.info("Logged in as account hash: {}", currentAccountHash);
+
+            // Load tracked items when player logs in
+            loadData();
+
+            // Check if bank is already open and potion storage should be initialized
+            // Must be called on client thread
+            if (config.trackPotionStorage())
+            {
+                clientThread.invokeLater(() ->
                 {
-                        // Load tracked items when player logs in
-                        loadTrackedItems();
+                    if (client.getItemContainer(InventoryID.BANK) != null)
+                    {
+                        rebuildPotions = true;
+                    }
+                });
+            }
+        }
+        else if (event.getGameState() == GameState.LOGIN_SCREEN)
+        {
+            // Save data when logging out
+            saveData();
+            // Clear panel when logging out
+            panel.resetPanel();
+
+            log.info("Logged out from account hash: {}", currentAccountHash);
+        }
+    }
+
+    public void sendChatMessage(String message)
+    {
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.CONSOLE)
+                .runeLiteFormattedMessage(message)
+                .build());
+    }
+
+    public void resetAllData()
+    {
+        // Clear in-memory data
+        trackedItems.clear();
+        categoryOrder.clear();
+        containerCaches.clear();
+        inventoryOnlyCategories.clear();
+
+        // Clear from config
+        configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "invOnlyCategories", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", "");
+        configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", "");
+
+        // Reset the panel UI
+        SwingUtilities.invokeLater(() -> {
+            panel.resetPanel();
+            sendChatMessage("All tracked items and categories have been reset.");
+        });
+
+        log.info("Reset all tracked items and categories");
+    }
+
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        int containerId = event.getContainerId();
+        ContainerTracker.Container container = ContainerTracker.getContainer(containerId);
+
+        // Check if this is a registered container and if tracking is enabled for it
+        if (container != null && isContainerTrackingEnabled(container))
+        {
+            updateContainerCache(containerId, event.getItemContainer());
+            updateTrackedItems();
+        }
+    }
+
+    /**
+     * Check if tracking is enabled for a specific container via config.
+     */
+    private boolean isContainerTrackingEnabled(ContainerTracker.Container container)
+    {
+        String configKey = container.getConfigKey();
+
+        // Use reflection or direct mapping to check config
+        switch (configKey)
+        {
+            case "trackBank":
+                return config.trackBank();
+            case "trackInventory":
+                return config.trackInventory();
+            case "trackSeedVault":
+                return config.trackSeedVault();
+            case "trackRetrievalService":
+                return config.trackRetrievalService();
+            case "trackGroupStorage":
+                return config.trackGroupStorage();
+            case "trackLootingBag":
+                return config.trackLootingBag();
+            case "trackPotionStorage":
+                return config.trackPotionStorage();
+            case "trackBoatInventory":
+                return config.trackBoatInventory();
+            case "trackPOHStorage":
+                return config.trackPOHStorage();
+            default:
+                return false;
+        }
+    }
+
+    @Subscribe
+    public void onConfigChanged(net.runelite.client.events.ConfigChanged event)
+    {
+        if (event.getGroup().equals("resourcetracker"))
+        {
+            // If display settings change, we need to refresh the UI to show/hide labels
+            if (event.getKey().equals("showCategoryTotals") || event.getKey().equals("showCategoryProgress"))
+            {
+                SwingUtilities.invokeLater(() -> panel.rebuild());
+            }
+        }
+    }
+    /**
+     * Update the cache for a specific container.
+     * This method is generic and works for any container type.
+     */
+    private void updateContainerCache(int containerId, ItemContainer container)
+    {
+        if (container == null)
+        {
+            return;
+        }
+
+        // Normalize container IDs to use the same cache for alternate IDs
+        int cacheId = normalizeContainerId(containerId);
+
+        // Get or create cache for this container
+        Map<Integer, Integer> cache = containerCaches.computeIfAbsent(cacheId, k -> new HashMap<>());
+        cache.clear();
+
+        // Cache all items in the container
+        for (Item item : container.getItems())
+        {
+            if (item.getId() > 0)
+            {
+                cache.merge(item.getId(), item.getQuantity(), Integer::sum);
+            }
+        }
+    }
+
+    /**
+     * Normalize container IDs to use the same cache for alternate IDs.
+     * Examples: 660 -> 93 (temp inventory), 33731 -> 963 (boat 1 alternate)
+     */
+    private int normalizeContainerId(int containerId)
+    {
+
+        // Boats: Normalize alternate IDs (33731-33735) to primary IDs (963-967)
+        if (containerId >= 33731 && containerId <= 33735)
+        {
+            return 963 + (containerId - 33731); // 33731->963, 33732->964, etc.
+        }
+
+        return containerId; // No normalization needed
+    }
+
+    public void updateTrackedItems()
+    {
+        // If no items are tracked, skip the update
+        if (trackedItems.isEmpty())
+        {
+            return;
+        }
+
+        boolean needsUpdate = false;
+
+        // Only iterate through tracked items, not all container items
+        for (TrackedItem trackedItem : trackedItems.values())
+        {
+            int itemId = trackedItem.getItemId();
+            int totalAmount = 0;
+            Map<String, Integer> breakdown = new HashMap<>();
+            Map<String, Integer> savedBreakdown = trackedItem.getContainerQuantities();
+            boolean hasScannedData = false;
+
+            // Check if this item is restricted to inventory only
+            boolean isRestrictedToInventory = inventoryOnlyCategories.contains(trackedItem.getCategory()) || trackedItem.isInventoryOnly();
+
+            // Track which normalized cache IDs we've already processed to avoid double-counting
+            java.util.Set<Integer> processedCaches = new java.util.HashSet<>();
+
+            // Dynamically check all registered containers
+            for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
+            {
+                // If restricted, skip any container that isn't inventory (ID 93)
+                if (isRestrictedToInventory && container.getId() != 93)
+                {
+                    continue;
                 }
-                else if (event.getGameState() == GameState.LOGIN_SCREEN)
-                {
-                        // Clear panel when logging out
-                        panel.resetPanel();
-                }
-        }
 
-        public void sendChatMessage(String message)
-        {
-                chatMessageManager.queue(QueuedMessage.builder()
-                        .type(ChatMessageType.CONSOLE)
-                        .runeLiteFormattedMessage(message)
-                        .build());
-        }
-
-        @SuppressWarnings("unused")
-        @Subscribe
-        public void onItemContainerChanged(ItemContainerChanged event)
-        {
-                if (event.getContainerId() == InventoryID.BANK)
+                // Check if tracking is enabled for this container globally
+                if (!isContainerTrackingEnabled(container))
                 {
-                        updateBankItems(event.getItemContainer());
-                }
-        }
-
-        private void updateBankItems(ItemContainer itemContainer)
-        {
-                if (itemContainer == null)
-                {
-                        return;
+                    continue;
                 }
 
-                Map<Integer, Integer> bankItems = new HashMap<>();
-                for (Item item : itemContainer.getItems())
+                // Get the normalized cache ID to avoid counting alternate IDs twice
+                int normalizedCacheId = normalizeContainerId(container.getId());
+
+                if (processedCaches.contains(normalizedCacheId))
                 {
-                        if (item.getId() > 0)
+                    continue;
+                }
+
+                processedCaches.add(normalizedCacheId);
+                Map<Integer, Integer> cache = containerCaches.get(normalizedCacheId);
+
+                if (cache != null)
+                {
+                    Integer quantity = cache.get(itemId);
+                    int qty = (quantity != null ? quantity : 0);
+                    breakdown.put(container.getName(), qty);
+                    totalAmount += qty;
+                    hasScannedData = true;
+                }
+                else if (savedBreakdown != null && savedBreakdown.containsKey(container.getName()))
+                {
+                    int savedQty = savedBreakdown.get(container.getName());
+                    breakdown.put(container.getName(), savedQty);
+                    totalAmount += savedQty;
+                }
+            }
+
+            if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !breakdown.equals(savedBreakdown)))
+            {
+                trackedItem.setCurrentAmount(totalAmount);
+                trackedItem.setContainerQuantities(breakdown);
+                needsUpdate = true;
+            }
+        }
+
+        // Only save and rebuild if something actually changed
+        if (needsUpdate)
+        {
+            synchronized (updateLock)
+            {
+                // If an update is already pending, don't schedule another one
+                if (updatePending)
+                {
+                    return;
+                }
+                updatePending = true;
+            }
+
+            // Use invokeLater to batch UI updates and prevent multiple rapid rebuilds
+            SwingUtilities.invokeLater(() -> {
+                synchronized (updateLock)
+                {
+                    updatePending = false;
+                }
+                saveData();
+                panel.rebuild();
+            });
+        }
+    }
+
+    public void addTrackedItem(TrackedItem item)
+    {
+        if (trackedItems.containsKey(getTrackedItemKey(item.getItemId(), item.getCategory())))
+        {
+            return;
+        }
+
+        trackedItems.put(getTrackedItemKey(item.getItemId(), item.getCategory()), item);
+
+        // Force an update immediately to calculate initial values correctly based on current modes
+        updateTrackedItems();
+
+        SwingUtilities.invokeLater(() -> panel.rebuild());
+        saveData();
+    }
+
+    public void removeTrackedItem(int itemId, String category)
+    {
+        trackedItems.remove(getTrackedItemKey(itemId, category));
+        SwingUtilities.invokeLater(() -> panel.rebuild());
+        saveData();
+    }
+
+    public Map<String, TrackedItem> getTrackedItems()
+    {
+        return trackedItems;
+    }
+
+    // ===== NEW METHODS FOR CATEGORY INVENTORY ONLY MODE =====
+
+    public boolean isCategoryInventoryOnly(String category)
+    {
+        return inventoryOnlyCategories.contains(category);
+    }
+
+    public void toggleCategoryInventoryOnly(String category)
+    {
+        if (inventoryOnlyCategories.contains(category))
+        {
+            inventoryOnlyCategories.remove(category);
+        }
+        else
+        {
+            inventoryOnlyCategories.add(category);
+        }
+
+        // Save state and force an update to items
+        saveData();
+
+        // IMPORTANT: We must trigger a full updateTrackedItems scan so that
+        // when we toggle OFF, we re-scan the Bank caches that were being ignored.
+        // We run it on the client thread to be safe with cache access, though caches are synchronized.
+        updateTrackedItems();
+
+        // Force UI rebuild to show the new colors/totals
+        SwingUtilities.invokeLater(() -> panel.rebuild());
+    }
+
+    /**
+     * Detect when bank finishes building to trigger potion storage rebuild.
+     */
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onScriptPostFired(ScriptPostFired event)
+    {
+        if (event.getScriptId() == ScriptID.BANKMAIN_FINISHBUILDING && config.trackPotionStorage())
+        {
+            rebuildPotions = true;
+        }
+    }
+
+    /**
+     * On client tick, rebuild potion storage if flagged and cache the varbit triggers.
+     */
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onClientTick(ClientTick event)
+    {
+        if (rebuildPotions && !potionRebuildInProgress)
+        {
+            potionRebuildInProgress = true;
+            rebuildPotions = false; // Clear the flag immediately to prevent double processing
+
+            updatePotionStorageCache();
+
+            potionRebuildInProgress = false;
+
+            // Cache the varbits that trigger potion store rebuilds (only do this once)
+            Widget w = client.getWidget(InterfaceID.Bankmain.POTIONSTORE_ITEMS);
+            if (w != null && potionStoreVars == null)
+            {
+                int[] trigger = w.getVarTransmitTrigger();
+                potionStoreVars = new HashSet<>();
+                Arrays.stream(trigger).forEach(potionStoreVars::add);
+            }
+        }
+    }
+
+    /**
+     * Watch for varbit changes that affect potion storage.
+     */
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onVarbitChanged(VarbitChanged varbitChanged)
+    {
+        if (potionStoreVars != null && potionStoreVars.contains(varbitChanged.getVarpId()))
+        {
+            // Only set the flag, don't directly call update
+            // This prevents multiple rapid-fire updates
+            rebuildPotions = true;
+        }
+    }
+
+    /**
+     * Update the potion storage cache by reading from game enums and scripts.
+     * potion storage doesn't have a normal ItemContainer.
+     */
+    private void updatePotionStorageCache()
+    {
+        final Map<Integer, Integer> potionQtyMap = new HashMap<>();
+
+        // Get potion enums from the client
+        EnumComposition potionStorePotions = client.getEnum(EnumID.POTIONSTORE_POTIONS);
+        EnumComposition potionStoreUnfinishedPotions = client.getEnum(EnumID.POTIONSTORE_UNFINISHED_POTIONS);
+
+        // Process both regular and unfinished potions
+        for (EnumComposition e : new EnumComposition[]{potionStorePotions, potionStoreUnfinishedPotions})
+        {
+            for (int potionEnumId : e.getIntVals())
+            {
+                EnumComposition potionEnum = client.getEnum(potionEnumId);
+
+                // Run the script to get the dose count for this potion
+                client.runScript(ScriptID.POTIONSTORE_DOSES, potionEnumId);
+                int doses = client.getIntStack()[0];
+
+                if (doses > 0)
+                {
+                    for (int doseLevel = 1; doseLevel <= 4; doseLevel++)
+                    {
+                        int itemId = potionEnum.getIntValue(doseLevel);
+                        if (itemId > 0)
                         {
-                                bankItems.merge(item.getId(), item.getQuantity(), Integer::sum);
+                            // Convert total doses into containers of this dose level
+                            int quantity = doses / doseLevel;
+                            potionQtyMap.put(itemId, quantity);
                         }
+                    }
                 }
+            }
+        }
 
-                boolean needsUpdate = false;
-                List<TrackedItem> items = panel.getTrackedItems();
+        // Update the cache with potion storage fake container ID
+        int potionStorageId = ContainerTracker.POTION_STORAGE.getId();
+        int cacheId = normalizeContainerId(potionStorageId);
+        Map<Integer, Integer> cache = containerCaches.computeIfAbsent(cacheId, k -> new HashMap<>());
 
-                for (TrackedItem trackedItem : items)
+        // Check if the cache actually changed before updating
+        boolean cacheChanged = !cache.equals(potionQtyMap);
+
+        if (cacheChanged)
+        {
+            cache.clear();
+            cache.putAll(potionQtyMap);
+            log.debug("Updated potion storage cache with {} potion types", potionQtyMap.size());
+
+            // Only update tracked items if the cache actually changed
+            updateTrackedItems();
+        }
+    }
+
+
+    public void saveData()
+    {
+        // Verify we're logged in before saving
+        String accountHash = getAccountHash();
+        if (accountHash == null)
+        {
+            log.warn("Cannot save data - no account logged in");
+            return;
+        }
+
+        if (!accountHash.equals(currentAccountHash))
+        {
+            log.warn("Account mismatch detected - skipping save");
+            return;
+        }
+
+        Gson gson = new Gson();
+
+        // Save tracked items
+        if (trackedItems.isEmpty())
+        {
+            configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", "");
+        }
+        else
+        {
+            List<TrackedItem> itemList = new ArrayList<>(trackedItems.values());
+            String json = gson.toJson(itemList);
+            log.debug("Saving {} tracked items for account {}", trackedItems.size(), accountHash);
+            configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+        }
+
+        // Save inventory only categories
+        String invOnlyJson = inventoryOnlyCategories.isEmpty() ? "" : gson.toJson(inventoryOnlyCategories);
+        configManager.setRSProfileConfiguration("resourcetracker", "invOnlyCategories", invOnlyJson);
+        if (!inventoryOnlyCategories.isEmpty())
+        {
+            log.debug("Saved {} inventory-only categories for account {}", inventoryOnlyCategories.size(), accountHash);
+        }
+
+        // Save container caches with timestamp
+        if (containerCaches.isEmpty())
+        {
+            configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", "");
+            configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", "");
+        }
+        else
+        {
+            String cacheJson = gson.toJson(containerCaches);
+            configManager.setRSProfileConfiguration("resourcetracker", "containerCaches", cacheJson);
+            configManager.setRSProfileConfiguration("resourcetracker", "cacheTimestamp", String.valueOf(System.currentTimeMillis()));
+            log.debug("Saved caches for {} containers for account {}", containerCaches.size(), accountHash);
+        }
+
+        // Save category order
+        saveCategoryOrder();
+    }
+
+    private void saveCategoryOrder()
+    {
+        Gson gson = new Gson();
+        String orderJson = gson.toJson(categoryOrder);
+        configManager.setRSProfileConfiguration("resourcetracker", "categoryOrder", orderJson);
+        log.debug("Saved category order: {}", categoryOrder);
+    }
+
+    private void loadCategoryOrder()
+    {
+        String orderJson = configManager.getRSProfileConfiguration("resourcetracker", "categoryOrder");
+        if (orderJson != null && !orderJson.isEmpty())
+        {
+            try
+            {
+                Gson gson = new Gson();
+                Type type = new TypeToken<List<String>>(){}.getType();
+                List<String> loaded = gson.fromJson(orderJson, type);
+                if (loaded != null)
                 {
-                        int amount = bankItems.getOrDefault(trackedItem.getItemId(), 0);
-                        if (trackedItem.getCurrentAmount() != amount)
-                        {
-                                trackedItem.setCurrentAmount(amount);
-                                needsUpdate = true;
+                    categoryOrder.clear();
+                    categoryOrder.addAll(loaded);
+                    log.debug("Loaded category order: {}", categoryOrder);
+                }
+            }
+            catch (Exception e)
+            {
+                log.error("Error loading category order", e);
+            }
+        }
+    }
+
+    public void registerCategory(String categoryName)
+    {
+        if (!categoryOrder.contains(categoryName))
+        {
+            categoryOrder.add(categoryName);
+            saveCategoryOrder();
+            log.debug("Registered new category: {}", categoryName);
+        }
+    }
+
+    public void removeCategory(String categoryName)
+    {
+        categoryOrder.remove(categoryName);
+        saveCategoryOrder();
+        log.debug("Removed category: {}", categoryName);
+    }
+
+    public void renameCategory(String oldName, String newName)
+    {
+        int index = categoryOrder.indexOf(oldName);
+        if (index != -1)
+        {
+            categoryOrder.set(index, newName);
+            saveCategoryOrder();
+            saveData();
+            log.debug("Renamed category '{}' to '{}'", oldName, newName);
+        }
+    }
+
+    public void moveCategoryOrder(String categoryName, int newIndex)
+    {
+        categoryOrder.remove(categoryName);
+        categoryOrder.add(newIndex, categoryName);
+        saveCategoryOrder();
+        SwingUtilities.invokeLater(() -> panel.rebuild());
+        log.debug("Moved category {} to index {}", categoryName, newIndex);
+    }
+
+    public List<String> getCategoryOrder()
+    {
+        return new ArrayList<>(categoryOrder);
+    }
+
+    private void loadData()
+    {
+        String accountHash = getAccountHash();
+        if (accountHash == null)
+        {
+            log.warn("Cannot load data - no account logged in");
+            return;
+        }
+
+        log.info("Loading data for account hash: {}", accountHash);
+
+        Gson gson = new Gson();
+
+        // Load category order first
+        loadCategoryOrder();
+
+        // Load Inventory Only Categories
+        String invOnlyJson = configManager.getRSProfileConfiguration("resourcetracker", "invOnlyCategories");
+        if (invOnlyJson != null && !invOnlyJson.isEmpty())
+        {
+            try {
+                Type type = new TypeToken<Set<String>>(){}.getType();
+                Set<String> loaded = gson.fromJson(invOnlyJson, type);
+                if (loaded != null) {
+                    inventoryOnlyCategories.clear();
+                    inventoryOnlyCategories.addAll(loaded);
+                    log.debug("Loaded {} inventory-only categories", inventoryOnlyCategories.size());
+                }
+            } catch (Exception e) {
+                log.error("Error loading inventory only categories", e);
+            }
+        }
+
+        // Load container caches
+        String cacheJson = configManager.getRSProfileConfiguration("resourcetracker", "containerCaches");
+        String timestampStr = configManager.getRSProfileConfiguration("resourcetracker", "cacheTimestamp");
+
+        if (cacheJson != null && !cacheJson.isEmpty())
+        {
+            try {
+                Type type = new TypeToken<Map<Integer, Map<Integer, Integer>>>(){}.getType();
+                Map<Integer, Map<Integer, Integer>> loadedCache = gson.fromJson(cacheJson, type);
+                if (loadedCache != null) {
+                    containerCaches.clear();
+                    containerCaches.putAll(loadedCache);
+
+                    // Check cache age
+                    if (timestampStr != null && !timestampStr.isEmpty())
+                    {
+                        try {
+                            long timestamp = Long.parseLong(timestampStr);
+                            long ageHours = (System.currentTimeMillis() - timestamp) / (1000 * 60 * 60);
+                            log.info("Loaded caches for {} containers (age: {} hours) for account {}",
+                                    containerCaches.size(), ageHours, accountHash);
+
+                            if (ageHours > 24)
+                            {
+                                log.warn("Container cache is {} hours old - data may be stale", ageHours);
+                            }
+                        } catch (NumberFormatException e) {
+                            log.warn("Invalid cache timestamp");
                         }
+                    }
+                    else
+                    {
+                        log.debug("Loaded caches for {} containers (no timestamp)", containerCaches.size());
+                    }
                 }
-
-                if (needsUpdate)
-                {
-                        saveTrackedItems(items);
-                        SwingUtilities.invokeLater(() -> panel.rebuild());
-                }
+            } catch (Exception e) {
+                log.error("Error loading container caches", e);
+                // Clear potentially corrupted cache
+                containerCaches.clear();
+            }
         }
 
-        public void saveTrackedItems(List<TrackedItem> items)
+        String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
+        if (json == null || json.isEmpty())
         {
-                String json = gson.toJson(items);
-                log.debug("Saving tracked items: {}", json);
-                configManager.setRSProfileConfiguration("resourcetracker", "trackedItems", json);
+            log.debug("No tracked items to load for account {}", accountHash);
+            return;
         }
 
-
-        private void loadTrackedItems()
+        try
         {
-                String json = configManager.getRSProfileConfiguration("resourcetracker", "trackedItems");
-                log.debug("Loading tracked items: {}", json);
+            Type type = new TypeToken<List<TrackedItem>>()
+            {
+            }.getType();
+            List<TrackedItem> itemList = gson.fromJson(json, type);
 
-                if (json == null || json.isEmpty())
-                {
-                        log.debug("No tracked items found in profile");
-                        return;
-                }
+            if (itemList == null)
+            {
+                log.warn("Failed to deserialize tracked items - null result");
+                return;
+            }
 
-                try
+            trackedItems.clear();
+            for (TrackedItem item : itemList)
+            {
+                if (item != null && item.getItemId() > 0)
                 {
-                        Type listType = new TypeToken<ArrayList<TrackedItem>>(){}.getType();
-                        List<TrackedItem> items = gson.fromJson(json, listType);
-                        if (items != null)
-                        {
-                                log.debug("Loaded {} items", items.size());
-                                panel.setTrackedItems(items);
-                        }
+                    // Ensure containerQuantities is not null
+                    if (item.getContainerQuantities() == null)
+                    {
+                        item.setContainerQuantities(new HashMap<>());
+                    }
+                    // Ensure category is not null
+                    if (item.getCategory() == null || item.getCategory().isEmpty())
+                    {
+                        item.setCategory("Default");
+                    }
+
+                    // Fetch and set prices if not already set (for backwards compatibility)
+                    if (item.getGePrice() == 0)
+                    {
+                        item.setGePrice(itemManager.getItemPrice(item.getItemId()));
+                    }
+                    if (item.getHaPrice() == 0)
+                    {
+                        item.setHaPrice(itemManager.getItemComposition(item.getItemId()).getHaPrice());
+                    }
+
+                    trackedItems.put(getTrackedItemKey(item.getItemId(), item.getCategory()), item);
+
+                    // Register category if not already in order
+                    if (!categoryOrder.contains(item.getCategory()))
+                    {
+                        categoryOrder.add(item.getCategory());
+                    }
                 }
-                catch (Exception e)
-                {
-                        log.error("Failed to load tracked items", e);
-                }
+            }
+
+            // Sync items with the loaded caches immediately
+            updateTrackedItems();
+
+            log.info("Loaded {} tracked items for account {}", trackedItems.size(), accountHash);
+            // Initial load of UI
+            SwingUtilities.invokeLater(() -> panel.loadItems(trackedItems.values()));
         }
-
-        public net.runelite.client.ui.ClientUI getClientUi() {
-            return clientUi;
-        }
-
-        @Provides
-        ResourceTrackerConfig provideConfig(ConfigManager configManager)
+        catch (Exception e)
         {
-                return configManager.getConfig(ResourceTrackerConfig.class);
+            log.error("Error loading tracked items from config for account {}", accountHash, e);
+            // On error, clear potentially corrupted data
+            trackedItems.clear();
         }
+    }
+
+
+    @Provides
+    ResourceTrackerConfig provideConfig(ConfigManager configManager)
+    {
+        return configManager.getConfig(ResourceTrackerConfig.class);
+    }
 }
