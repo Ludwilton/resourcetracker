@@ -1,5 +1,5 @@
 # Resource Tracker Plugin
-
+![Active Installs](http://img.shields.io/endpoint?url=https://api.runelite.net/pluginhub/shields/installs/plugin/resourcetracker)
 ## Overview
 
 The Resource Tracker is a [RuneLite](https://runelite.net/) plugin that allows you to track your progress towards specific item goals. It is perfect for keeping track of resources for skilling, PvM, Questing, etc.
