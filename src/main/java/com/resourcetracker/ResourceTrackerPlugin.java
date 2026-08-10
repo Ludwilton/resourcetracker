@@ -12,6 +12,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ScriptID;
+import net.runelite.api.annotations.Interface;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -344,6 +345,12 @@ public class ResourceTrackerPlugin extends Plugin
         return containerId; // No normalization needed
     }
 
+    private boolean isInterfaceOpen(@Interface int groupId, int childId)
+    {
+        Widget w = client.getWidget(groupId, childId);
+        return w != null && !w.isHidden();
+    }
+
     public void updateTrackedItems()
     {
         // If no items are tracked, skip the update
@@ -353,6 +360,10 @@ public class ResourceTrackerPlugin extends Plugin
         }
 
         boolean needsUpdate = false;
+
+        // Will need special handling for deposit boxes
+        boolean depositBoxOpen = isInterfaceOpen(InterfaceID.BANK_DEPOSITBOX, 0) ||
+                isInterfaceOpen(InterfaceID.BANK_DEPOSIT_IMP, 0);
 
         // Only iterate through tracked items, not all container items
         for (TrackedItem trackedItem : trackedItems.values())
@@ -411,7 +422,21 @@ public class ResourceTrackerPlugin extends Plugin
                 }
             }
 
-            if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !breakdown.equals(savedBreakdown)))
+            int savedAmount = trackedItem.getCurrentAmount();
+            int diff = savedAmount - totalAmount;
+
+            // if quantity changed with deposit box interface open, assume items went to the bank.
+            // allow negative diffs to account for equipping/unequipping trackable items such as ammo.
+            if (!isRestrictedToInventory && depositBoxOpen && diff != 0)
+            {
+                final String bankKey = ContainerTracker.BANK.getName();
+                Integer bankQty = breakdown.get(bankKey);
+                bankQty = (bankQty == null ? 0 : bankQty) + diff;
+                breakdown.put(bankKey, bankQty);
+                totalAmount += diff;
+            }
+
+            if (hasScannedData && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
             {
                 trackedItem.setCurrentAmount(totalAmount);
                 trackedItem.setContainerQuantities(breakdown);
