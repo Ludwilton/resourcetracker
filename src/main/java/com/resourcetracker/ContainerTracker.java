@@ -1,5 +1,7 @@
 package com.resourcetracker;
 
+import net.runelite.api.gameval.InventoryID;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -46,6 +48,7 @@ public class ContainerTracker
 	// Then add the config item to ResourceTrackerConfig.java
 	public static final Container BANK = new Container(95, "Bank", "trackBank");
 	public static final Container INVENTORY = new Container(93, "Inventory", "trackInventory");
+	public static final Container WORN_INVENTORY = new Container(InventoryID.WORN, "Worn Inventory", "trackInventory");
 	public static final Container SEED_VAULT = new Container(626, "Seed Vault", "trackSeedVault");
 	public static final Container RETRIEVAL_SERVICE = new Container(525, "Retrieval Service", "trackRetrievalService");
 	public static final Container GROUP_STORAGE = new Container(659, "Group storage", "trackGroupStorage");
@@ -72,6 +75,7 @@ public class ContainerTracker
 		// Register all containers
 		registerContainer(BANK);
 		registerContainer(INVENTORY);
+		registerContainer(WORN_INVENTORY);
 		registerContainer(SEED_VAULT);
 		registerContainer(RETRIEVAL_SERVICE);
 		registerContainer(GROUP_STORAGE);

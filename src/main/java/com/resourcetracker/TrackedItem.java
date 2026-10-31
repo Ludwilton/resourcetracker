@@ -14,7 +14,7 @@ public class TrackedItem
     private String category;
     private Integer goalAmount;
     private Map<String, Integer> containerQuantities = new HashMap<>();
-    private int gePrice; // Grand Exchange price
+    private long gePrice; // Grand Exchange price
     private int haPrice; // High Alchemy price
     private boolean inventoryOnly = false;
 
@@ -41,7 +41,7 @@ public class TrackedItem
 
     public long getTotalGePrice()
     {
-        return (long) gePrice * currentAmount;
+        return gePrice * currentAmount;
     }
 
     public long getTotalHaPrice()

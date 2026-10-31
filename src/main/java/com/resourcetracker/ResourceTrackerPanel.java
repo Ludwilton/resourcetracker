@@ -818,7 +818,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
 			// Fetch and set GE and HA prices on client thread
 			plugin.getClientThread().invoke(() -> {
-				int gePrice = itemManager.getItemPrice(itemDef.getId());
+				long gePrice = itemManager.getItemPrice(itemDef.getId());
 				int haPrice = itemManager.getItemComposition(itemDef.getId()).getHaPrice();
 				newItem.setGePrice(gePrice);
 				newItem.setHaPrice(haPrice);
@@ -956,4 +956,3 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         });
     }
 }
-

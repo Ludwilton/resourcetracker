@@ -12,6 +12,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ScriptID;
+import net.runelite.api.annotations.Interface;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -344,6 +345,18 @@ public class ResourceTrackerPlugin extends Plugin
         return containerId; // No normalization needed
     }
 
+    private boolean isInterfaceOpen(@Interface int groupId, int childId)
+    {
+        Widget w = client.getWidget(groupId, childId);
+        return w != null && !w.isHidden();
+    }
+
+    private boolean isInventoryContainer(ContainerTracker.Container container)
+    {
+        return container.getId() == ContainerTracker.INVENTORY.getId()
+                || container.getId() == ContainerTracker.WORN_INVENTORY.getId();
+    }
+
     public void updateTrackedItems()
     {
         // If no items are tracked, skip the update
@@ -353,6 +366,10 @@ public class ResourceTrackerPlugin extends Plugin
         }
 
         boolean needsUpdate = false;
+
+        // Will need special handling for deposit boxes
+        boolean depositBoxOpen = isInterfaceOpen(InterfaceID.BANK_DEPOSITBOX, 0) ||
+                isInterfaceOpen(InterfaceID.BANK_DEPOSIT_IMP, 0);
 
         // Only iterate through tracked items, not all container items
         for (TrackedItem trackedItem : trackedItems.values())
@@ -372,11 +389,7 @@ public class ResourceTrackerPlugin extends Plugin
             // Dynamically check all registered containers
             for (ContainerTracker.Container container : ContainerTracker.getAllContainers().values())
             {
-                // If restricted, skip any container that isn't inventory (ID 93)
-                if (isRestrictedToInventory && container.getId() != 93)
-                {
-                    continue;
-                }
+                boolean includeInTotal = !isRestrictedToInventory || isInventoryContainer(container);
 
                 // Check if tracking is enabled for this container globally
                 if (!isContainerTrackingEnabled(container))
@@ -400,18 +413,51 @@ public class ResourceTrackerPlugin extends Plugin
                     Integer quantity = cache.get(itemId);
                     int qty = (quantity != null ? quantity : 0);
                     breakdown.put(container.getName(), qty);
-                    totalAmount += qty;
+                    if (includeInTotal)
+                    {
+                        totalAmount += qty;
+                    }
                     hasScannedData = true;
                 }
                 else if (savedBreakdown != null && savedBreakdown.containsKey(container.getName()))
                 {
                     int savedQty = savedBreakdown.get(container.getName());
                     breakdown.put(container.getName(), savedQty);
-                    totalAmount += savedQty;
+                    if (includeInTotal)
+                    {
+                        totalAmount += savedQty;
+                    }
                 }
             }
 
-            if (hasScannedData && (trackedItem.getCurrentAmount() != totalAmount || !breakdown.equals(savedBreakdown)))
+            int savedAmount = trackedItem.getCurrentAmount();
+            int diff = savedAmount - totalAmount;
+
+            // If quantity changed with the deposit box open, assume the difference
+            // was deposited into or withdrawn from the bank. Keep this bank
+            // adjustment even in inventory-only mode so it is available when
+            // inventory-only tracking is later disabled.
+            if (depositBoxOpen && diff != 0)
+            {
+                final String bankKey = ContainerTracker.BANK.getName();
+                Integer bankQty = breakdown.get(bankKey);
+                bankQty = (bankQty == null ? 0 : bankQty) + diff;
+                breakdown.put(bankKey, bankQty);
+                if (!isRestrictedToInventory)
+                {
+                    totalAmount += diff;
+                }
+
+                // Keep the inferred bank quantity in the cache as well. Deposit
+                // boxes do not always emit a bank container update, so without
+                // this the next recalculation can restore a stale bank value.
+                Map<Integer, Integer> bankCache = containerCaches.computeIfAbsent(
+                        normalizeContainerId(ContainerTracker.BANK.getId()),
+                        k -> new HashMap<>());
+                bankCache.put(itemId, bankQty);
+            }
+
+            if (hasScannedData && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
             {
                 trackedItem.setCurrentAmount(totalAmount);
                 trackedItem.setContainerQuantities(breakdown);
@@ -493,14 +539,12 @@ public class ResourceTrackerPlugin extends Plugin
         // Save state and force an update to items
         saveData();
 
-        // IMPORTANT: We must trigger a full updateTrackedItems scan so that
-        // when we toggle OFF, we re-scan the Bank caches that were being ignored.
-        // We run it on the client thread to be safe with cache access, though caches are synchronized.
         updateTrackedItems();
 
         // Force UI rebuild to show the new colors/totals
         SwingUtilities.invokeLater(() -> panel.rebuild());
     }
+
 
     /**
      * Detect when bank finishes building to trigger potion storage rebuild.
