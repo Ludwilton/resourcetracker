@@ -121,6 +121,7 @@ public class ResourceTrackerPlugin extends Plugin
     // Update debouncing
     private boolean updatePending = false;
     private final Object updateLock = new Object();
+    private boolean forceTrackedItemsUpdate = false;
 
     @Override
     protected void startUp()
@@ -299,6 +300,13 @@ public class ResourceTrackerPlugin extends Plugin
             {
                 SwingUtilities.invokeLater(() -> panel.rebuild());
             }
+            else if (event.getKey().startsWith("track"))
+            {
+                forceTrackedItemsUpdate = true;
+                updateTrackedItems();
+                forceTrackedItemsUpdate = false;
+                SwingUtilities.invokeLater(() -> panel.rebuild());
+            }
         }
     }
     /**
@@ -457,7 +465,8 @@ public class ResourceTrackerPlugin extends Plugin
                 bankCache.put(itemId, bankQty);
             }
 
-            if (hasScannedData && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
+            if ((hasScannedData || forceTrackedItemsUpdate)
+                    && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
             {
                 trackedItem.setCurrentAmount(totalAmount);
                 trackedItem.setContainerQuantities(breakdown);
