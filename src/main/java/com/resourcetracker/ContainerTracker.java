@@ -68,7 +68,6 @@ public class ContainerTracker
 
 	// Map for quick lookup by ID
 	private static final Map<Integer, Container> CONTAINER_BY_ID = new HashMap<>();
-	private static final Map<String, Container> CONTAINER_BY_CONFIG_KEY = new HashMap<>();
 
 	static
 	{
@@ -97,7 +96,6 @@ public class ContainerTracker
 	private static void registerContainer(Container container)
 	{
 		CONTAINER_BY_ID.put(container.getId(), container);
-		CONTAINER_BY_CONFIG_KEY.put(container.getConfigKey(), container);
 	}
 
 	/**
@@ -112,17 +110,6 @@ public class ContainerTracker
 	}
 
 	/**
-	 * Get container by config key.
-	 *
-	 * @param configKey The config key (e.g., "trackBank")
-	 * @return The Container object, or null if not found
-	 */
-	public static Container getContainerByConfigKey(String configKey)
-	{
-		return CONTAINER_BY_CONFIG_KEY.get(configKey);
-	}
-
-	/**
 	 * Get all registered containers.
 	 *
 	 * @return Map of container ID to Container object
@@ -132,53 +119,4 @@ public class ContainerTracker
 		return new HashMap<>(CONTAINER_BY_ID);
 	}
 
-	/**
-	 * Gets the friendly name for a container type.
-	 *
-	 * @param containerId The ID of the container
-	 * @return The friendly name of the container, or "Unknown" if not recognized
-	 */
-	public static String getContainerFriendlyName(int containerId)
-	{
-		Container container = CONTAINER_BY_ID.get(containerId);
-		return container != null ? container.getName() : "Unknown";
-	}
-
-	/**
-	 * Check if a container ID is registered.
-	 *
-	 * @param containerId The container ID to check
-	 * @return true if the container is registered
-	 */
-	public static boolean isRegistered(int containerId)
-	{
-		return CONTAINER_BY_ID.containsKey(containerId);
-	}
-
-	/**
-	 * Builds an HTML tooltip showing the breakdown of item quantities by container.
-	 *
-	 * @param item The tracked item to build a tooltip for
-	 * @return HTML-formatted tooltip string, or null if no containers have items
-	 */
-	public static String buildContainerTooltip(TrackedItem item)
-	{
-		Map<String, Integer> containers = item.getContainerQuantities();
-		if (containers == null || containers.isEmpty())
-		{
-			return null;
-		}
-
-		StringBuilder tooltip = new StringBuilder("<html>");
-		containers.entrySet().stream()
-				.filter(e -> e.getValue() > 0)
-				.sorted(Map.Entry.comparingByKey())
-				.forEach(e -> tooltip.append(e.getKey())
-						.append(": ")
-						.append(String.format("%,d", e.getValue()))
-						.append("<br>"));
-		tooltip.append("</html>");
-
-		return tooltip.toString();
-	}
 }

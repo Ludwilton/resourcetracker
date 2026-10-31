@@ -9,7 +9,6 @@ public class TrackedItem
 {
     private int itemId;
     private String itemName;
-    private int startingAmount;
     private int currentAmount;
     private String category;
     private Integer goalAmount;

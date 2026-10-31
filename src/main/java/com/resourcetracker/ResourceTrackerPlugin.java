@@ -759,20 +759,38 @@ public class ResourceTrackerPlugin extends Plugin
     public void removeCategory(String categoryName)
     {
         categoryOrder.remove(categoryName);
+        inventoryOnlyCategories.remove(categoryName);
         saveCategoryOrder();
+        saveData();
         log.debug("Removed category: {}", categoryName);
     }
 
     public void renameCategory(String oldName, String newName)
     {
+        Map<String, TrackedItem> renamedItems = new HashMap<>();
+        for (TrackedItem item : trackedItems.values())
+        {
+            if (item.getCategory().equals(oldName))
+            {
+                item.setCategory(newName);
+            }
+            renamedItems.put(getTrackedItemKey(item.getItemId(), item.getCategory()), item);
+        }
+        trackedItems.clear();
+        trackedItems.putAll(renamedItems);
+
         int index = categoryOrder.indexOf(oldName);
         if (index != -1)
         {
             categoryOrder.set(index, newName);
-            saveCategoryOrder();
-            saveData();
-            log.debug("Renamed category '{}' to '{}'", oldName, newName);
         }
+        if (inventoryOnlyCategories.remove(oldName))
+        {
+            inventoryOnlyCategories.add(newName);
+        }
+        saveCategoryOrder();
+        saveData();
+        log.debug("Renamed category '{}' to '{}'", oldName, newName);
     }
 
     public void moveCategoryOrder(String categoryName, int newIndex)
