@@ -2,7 +2,7 @@ package com.resourcetracker;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
-import net.runelite.api.ItemID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -20,7 +20,6 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 import javax.swing.text.DocumentFilter;
 import java.awt.*;
-import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.UnsupportedFlavorException;
@@ -356,12 +355,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     }
 
 
-    public List<TrackedItem> getTrackedItems()
-    {
-        return new ArrayList<>(plugin.getTrackedItems().values());
-    }
-
-    public void loadItems(java.util.Collection<TrackedItem> items)
+    public void loadItems()
     {
         rebuildTrackedItems();
     }
@@ -383,7 +377,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void rebuild()
     {
-        loadItems(plugin.getTrackedItems().values());
+        loadItems();
     }
 
     public void setSelectedCategory(String category)
@@ -795,7 +789,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }
 
                 ItemComposition composition = itemManager.getItemComposition(itemId);
-                if (composition != null && composition.getName() != null)
+                if (composition.getName() != null)
                 {
                     items.add(new ItemDefinition(itemId, composition.getName()));
                 }

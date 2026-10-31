@@ -12,7 +12,7 @@ public class TrackedItem
     private int currentAmount;
     private String category;
     private Integer goalAmount;
-    private Map<String, Integer> containerQuantities = new HashMap<>();
+    private Map<String, Integer> containerQuantities;
     private long gePrice; // Grand Exchange price
     private int haPrice; // High Alchemy price
     private boolean inventoryOnly = false;

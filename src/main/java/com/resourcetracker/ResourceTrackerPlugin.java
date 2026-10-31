@@ -942,7 +942,7 @@ public class ResourceTrackerPlugin extends Plugin
 
             log.info("Loaded {} tracked items for account {}", trackedItems.size(), accountHash);
             // Initial load of UI
-            SwingUtilities.invokeLater(() -> panel.loadItems(trackedItems.values()));
+            SwingUtilities.invokeLater(panel::loadItems);
         }
         catch (Exception e)
         {
