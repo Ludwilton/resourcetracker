@@ -121,6 +121,7 @@ public class ResourceTrackerPlugin extends Plugin
     // Update debouncing
     private boolean updatePending = false;
     private final Object updateLock = new Object();
+    private boolean forceTrackedItemsUpdate = false;
 
     @Override
     protected void startUp()
@@ -299,6 +300,13 @@ public class ResourceTrackerPlugin extends Plugin
             {
                 SwingUtilities.invokeLater(() -> panel.rebuild());
             }
+            else if (event.getKey().startsWith("track"))
+            {
+                forceTrackedItemsUpdate = true;
+                updateTrackedItems();
+                forceTrackedItemsUpdate = false;
+                SwingUtilities.invokeLater(() -> panel.rebuild());
+            }
         }
     }
     /**
@@ -457,7 +465,8 @@ public class ResourceTrackerPlugin extends Plugin
                 bankCache.put(itemId, bankQty);
             }
 
-            if (hasScannedData && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
+            if ((hasScannedData || forceTrackedItemsUpdate)
+                    && (savedAmount != totalAmount || !breakdown.equals(savedBreakdown)))
             {
                 trackedItem.setCurrentAmount(totalAmount);
                 trackedItem.setContainerQuantities(breakdown);
@@ -759,20 +768,38 @@ public class ResourceTrackerPlugin extends Plugin
     public void removeCategory(String categoryName)
     {
         categoryOrder.remove(categoryName);
+        inventoryOnlyCategories.remove(categoryName);
         saveCategoryOrder();
+        saveData();
         log.debug("Removed category: {}", categoryName);
     }
 
     public void renameCategory(String oldName, String newName)
     {
+        Map<String, TrackedItem> renamedItems = new HashMap<>();
+        for (TrackedItem item : trackedItems.values())
+        {
+            if (item.getCategory().equals(oldName))
+            {
+                item.setCategory(newName);
+            }
+            renamedItems.put(getTrackedItemKey(item.getItemId(), item.getCategory()), item);
+        }
+        trackedItems.clear();
+        trackedItems.putAll(renamedItems);
+
         int index = categoryOrder.indexOf(oldName);
         if (index != -1)
         {
             categoryOrder.set(index, newName);
-            saveCategoryOrder();
-            saveData();
-            log.debug("Renamed category '{}' to '{}'", oldName, newName);
         }
+        if (inventoryOnlyCategories.remove(oldName))
+        {
+            inventoryOnlyCategories.add(newName);
+        }
+        saveCategoryOrder();
+        saveData();
+        log.debug("Renamed category '{}' to '{}'", oldName, newName);
     }
 
     public void moveCategoryOrder(String categoryName, int newIndex)
@@ -924,7 +951,7 @@ public class ResourceTrackerPlugin extends Plugin
 
             log.info("Loaded {} tracked items for account {}", trackedItems.size(), accountHash);
             // Initial load of UI
-            SwingUtilities.invokeLater(() -> panel.loadItems(trackedItems.values()));
+            SwingUtilities.invokeLater(panel::loadItems);
         }
         catch (Exception e)
         {

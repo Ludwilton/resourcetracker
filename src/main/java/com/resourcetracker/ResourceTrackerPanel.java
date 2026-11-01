@@ -1,6 +1,8 @@
 package com.resourcetracker;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ItemComposition;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -18,7 +20,6 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 import javax.swing.text.DocumentFilter;
 import java.awt.*;
-import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.UnsupportedFlavorException;
@@ -26,10 +27,13 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -96,15 +100,19 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     private final JPanel itemListPanel;
     private final JPanel searchResultsPanel;
+    private final JPanel searchResultsWrapper;
     private final JPanel contentWrapper;
     private final JScrollPane searchScrollPane;
     private final JScrollPane itemScrollPane;
     private final IconTextField searchBar;
     private final JTextField categoryNameField;
-    private final List<TrackedItem> trackedItems = new CopyOnWriteArrayList<>();
+    private final JCheckBox extendedSearchToggle;
+    private final JPanel extendedSearchToggleWrapper;
     private final List<CategoryBox> categoryBoxes = new ArrayList<>();
     private String selectedCategory = null;
     private static final int MAX_SEARCH_RESULTS = 50;
+    private List<ItemDefinition> extendedItemDefinitions;
+    private boolean extendedSearchLoading;
     private Timer searchDebounceTimer;
 
 
@@ -249,7 +257,26 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         searchResultsPanel.setLayout(new BoxLayout(searchResultsPanel, BoxLayout.Y_AXIS));
         searchResultsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-        searchScrollPane = new JScrollPane(searchResultsPanel);
+        extendedSearchToggle = new JCheckBox("Extended search");
+        extendedSearchToggle.setToolTipText("include additional untradable items");
+        extendedSearchToggle.setOpaque(false);
+        extendedSearchToggle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        extendedSearchToggleWrapper = new JPanel(new BorderLayout());
+        extendedSearchToggleWrapper.setOpaque(false);
+        extendedSearchToggleWrapper.add(extendedSearchToggle, BorderLayout.WEST);
+        extendedSearchToggle.addActionListener(e -> {
+            if (!searchBar.getText().trim().isEmpty())
+            {
+                showSearchResults(searchBar.getText().trim());
+            }
+        });
+
+        searchResultsWrapper = new JPanel(new BorderLayout());
+        searchResultsWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        searchResultsWrapper.add(extendedSearchToggleWrapper, BorderLayout.NORTH);
+        searchResultsWrapper.add(searchResultsPanel, BorderLayout.CENTER);
+
+        searchScrollPane = new JScrollPane(searchResultsWrapper);
         searchScrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
         searchScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         searchScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -328,22 +355,14 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
     }
 
 
-    public List<TrackedItem> getTrackedItems()
+    public void loadItems()
     {
-        return new ArrayList<>(plugin.getTrackedItems().values());
-    }
-
-    public void loadItems(java.util.Collection<TrackedItem> items)
-    {
-        trackedItems.clear();
-        trackedItems.addAll(items);
         rebuildTrackedItems();
     }
 
     public void resetPanel()
     {
         SwingUtilities.invokeLater(() -> {
-            trackedItems.clear();
             selectedCategory = null;
             searchBar.setEnabled(false); // No category selected, so disable search
             searchBar.setEditable(false); // Prevent typing when disabled
@@ -358,7 +377,7 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
     public void rebuild()
     {
-        loadItems(plugin.getTrackedItems().values());
+        loadItems();
     }
 
     public void setSelectedCategory(String category)
@@ -465,11 +484,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
             plugin.sendChatMessage("A category with that name already exists.");
             return;
         }
-
-        // Update all items in the category to use the new name
-        plugin.getTrackedItems().values().stream()
-                .filter(item -> item.getCategory().equals(oldName))
-                .forEach(item -> item.setCategory(trimmedNewName));
 
         // Update the category order tracking
         plugin.renameCategory(oldName, trimmedNewName);
@@ -683,6 +697,27 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                     return !itemName.contains("->") && !itemName.equals("null");
                 })
                 .map(itemPrice -> new ItemDefinition(itemPrice.getId(), itemPrice.getName()))
+                .collect(Collectors.toList());
+
+        if (extendedSearchToggle.isSelected())
+        {
+            if (extendedItemDefinitions == null)
+            {
+                requestExtendedItemDefinitions();
+            }
+            else
+            {
+                Set<Integer> resultIds = results.stream()
+                        .map(ItemDefinition::getId)
+                        .collect(Collectors.toSet());
+                extendedItemDefinitions.stream()
+                        .filter(item -> item.getName().toLowerCase().contains(lowerQuery))
+                        .filter(item -> resultIds.add(item.getId()))
+                        .forEach(results::add);
+            }
+        }
+
+        results = results.stream()
                 .sorted(Comparator.comparingInt((ItemDefinition item) -> {
                     String itemName = item.getName().toLowerCase();
                     if (itemName.equals(lowerQuery)) return 0;
@@ -691,7 +726,6 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
                 }).thenComparing(item -> item.getName().length()))
                 .limit(MAX_SEARCH_RESULTS)
                 .collect(Collectors.toList());
-
 
         for (ItemDefinition item : results)
         {
@@ -713,6 +747,60 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
 
         searchResultsPanel.revalidate();
         searchResultsPanel.repaint();
+    }
+
+    private void requestExtendedItemDefinitions()
+    {
+        if (!extendedSearchLoading)
+        {
+            extendedSearchLoading = true;
+            plugin.getClientThread().invoke(() -> {
+                List<ItemDefinition> loadedItems = loadExtendedItemDefinitions();
+                SwingUtilities.invokeLater(() -> {
+                    extendedItemDefinitions = loadedItems;
+                    extendedSearchLoading = false;
+                    if (extendedSearchToggle.isSelected())
+                    {
+                        onSearchChanged();
+                    }
+                });
+            });
+        }
+    }
+
+    private List<ItemDefinition> loadExtendedItemDefinitions()
+    {
+        List<ItemDefinition> items = new ArrayList<>();
+        Set<Integer> itemIds = new HashSet<>();
+
+        for (Field field : ItemID.class.getFields())
+        {
+            if (!Modifier.isStatic(field.getModifiers()) || field.getType() != int.class)
+            {
+                continue;
+            }
+
+            try
+            {
+                int itemId = field.getInt(null);
+                if (!itemIds.add(itemId))
+                {
+                    continue;
+                }
+
+                ItemComposition composition = itemManager.getItemComposition(itemId);
+                if (composition.getName() != null)
+                {
+                    items.add(new ItemDefinition(itemId, composition.getName()));
+                }
+            }
+            catch (IllegalAccessException | RuntimeException ex)
+            {
+                log.debug("Unable to load extended item definition from {}", field.getName(), ex);
+            }
+        }
+
+        return items;
     }
 
     private JPanel createSearchResultPanel(ItemDefinition itemDef)
