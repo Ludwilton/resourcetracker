@@ -2,7 +2,6 @@ package com.resourcetracker;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
-import net.runelite.api.gameval.ItemID;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -27,8 +26,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -556,8 +553,10 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         List<TrackedItem> importItems;
         try
         {
-            java.lang.reflect.Type listType = new com.google.gson.reflect.TypeToken<ArrayList<TrackedItem>>(){}.getType();
-            importItems = plugin.getGson().fromJson(clipboardText, listType);
+            TrackedItem[] importedItemArray = plugin.getGson().fromJson(clipboardText, TrackedItem[].class);
+            importItems = importedItemArray == null
+                ? null
+                : new ArrayList<>(List.of(importedItemArray));
         }
         catch (com.google.gson.JsonSyntaxException | IllegalStateException e)
         {
@@ -773,30 +772,18 @@ public class ResourceTrackerPanel extends PluginPanel implements Scrollable
         List<ItemDefinition> items = new ArrayList<>();
         Set<Integer> itemIds = new HashSet<>();
 
-        for (Field field : ItemID.class.getFields())
+        for (int itemId = 0; itemId < plugin.getClient().getItemCount(); itemId++)
         {
-            if (!Modifier.isStatic(field.getModifiers()) || field.getType() != int.class)
+            ItemComposition composition = itemManager.getItemComposition(itemId);
+            if (composition == null || composition.getName() == null)
             {
                 continue;
             }
 
-            try
+            String itemName = composition.getName();
+            if (!itemName.contains("->") && !itemName.equals("null") && itemIds.add(itemId))
             {
-                int itemId = field.getInt(null);
-                if (!itemIds.add(itemId))
-                {
-                    continue;
-                }
-
-                ItemComposition composition = itemManager.getItemComposition(itemId);
-                if (composition.getName() != null)
-                {
-                    items.add(new ItemDefinition(itemId, composition.getName()));
-                }
-            }
-            catch (IllegalAccessException | RuntimeException ex)
-            {
-                log.debug("Unable to load extended item definition from {}", field.getName(), ex);
+                items.add(new ItemDefinition(itemId, itemName));
             }
         }
 

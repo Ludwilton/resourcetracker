@@ -1,7 +1,6 @@
 package com.resourcetracker;
 
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +37,6 @@ import net.runelite.api.ChatMessageType;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -68,6 +66,7 @@ public class ResourceTrackerPlugin extends Plugin
     private ResourceTrackerConfig config;
 
     @Inject
+    @Getter
     private Client client;
 
     @Inject
@@ -264,7 +263,7 @@ public class ResourceTrackerPlugin extends Plugin
     {
         String configKey = container.getConfigKey();
 
-        // Use reflection or direct mapping to check config
+        // Map each container to its corresponding configuration flag.
         switch (configKey)
         {
             case "trackBank":
@@ -739,12 +738,11 @@ public class ResourceTrackerPlugin extends Plugin
         {
             try
             {
-                Type type = new TypeToken<List<String>>(){}.getType();
-                List<String> loaded = gson.fromJson(orderJson, type);
+                String[] loaded = gson.fromJson(orderJson, String[].class);
                 if (loaded != null)
                 {
                     categoryOrder.clear();
-                    categoryOrder.addAll(loaded);
+                    categoryOrder.addAll(Arrays.asList(loaded));
                     log.debug("Loaded category order: {}", categoryOrder);
                 }
             }
@@ -836,11 +834,10 @@ public class ResourceTrackerPlugin extends Plugin
         if (invOnlyJson != null && !invOnlyJson.isEmpty())
         {
             try {
-                Type type = new TypeToken<Set<String>>(){}.getType();
-                Set<String> loaded = gson.fromJson(invOnlyJson, type);
+                String[] loaded = gson.fromJson(invOnlyJson, String[].class);
                 if (loaded != null) {
                     inventoryOnlyCategories.clear();
-                    inventoryOnlyCategories.addAll(loaded);
+                    inventoryOnlyCategories.addAll(Arrays.asList(loaded));
                     log.debug("Loaded {} inventory-only categories", inventoryOnlyCategories.size());
                 }
             } catch (Exception e) {
@@ -855,14 +852,22 @@ public class ResourceTrackerPlugin extends Plugin
         if (cacheJson != null && !cacheJson.isEmpty())
         {
             try {
-                Type type = new TypeToken<Map<Integer, Map<Integer, Integer>>>(){}.getType();
-                Map<Integer, Map<Integer, Integer>> loadedCache = gson.fromJson(cacheJson, type);
-                if (loadedCache != null) {
-                    containerCaches.clear();
-                    containerCaches.putAll(loadedCache);
+                Map<Integer, Map<Integer, Integer>> loadedCache = new HashMap<>();
+                com.google.gson.JsonObject cacheObject = new com.google.gson.JsonParser().parse(cacheJson).getAsJsonObject();
+                for (Map.Entry<String, com.google.gson.JsonElement> containerEntry : cacheObject.entrySet())
+                {
+                    Map<Integer, Integer> containerCache = new HashMap<>();
+                    for (Map.Entry<String, com.google.gson.JsonElement> itemEntry : containerEntry.getValue().getAsJsonObject().entrySet())
+                    {
+                        containerCache.put(Integer.parseInt(itemEntry.getKey()), itemEntry.getValue().getAsInt());
+                    }
+                    loadedCache.put(Integer.parseInt(containerEntry.getKey()), containerCache);
+                }
+                containerCaches.clear();
+                containerCaches.putAll(loadedCache);
 
-                    // Check cache age
-                    if (timestampStr != null && !timestampStr.isEmpty())
+                // Check cache age
+                if (!loadedCache.isEmpty() && timestampStr != null && !timestampStr.isEmpty())
                     {
                         try {
                             long timestamp = Long.parseLong(timestampStr);
@@ -878,11 +883,10 @@ public class ResourceTrackerPlugin extends Plugin
                             log.warn("Invalid cache timestamp");
                         }
                     }
-                    else
+                else if (!loadedCache.isEmpty())
                     {
                         log.debug("Loaded caches for {} containers (no timestamp)", containerCaches.size());
                     }
-                }
             } catch (Exception e) {
                 log.error("Error loading container caches", e);
                 // Clear potentially corrupted cache
@@ -899,10 +903,8 @@ public class ResourceTrackerPlugin extends Plugin
 
         try
         {
-            Type type = new TypeToken<List<TrackedItem>>()
-            {
-            }.getType();
-            List<TrackedItem> itemList = gson.fromJson(json, type);
+            TrackedItem[] itemArray = gson.fromJson(json, TrackedItem[].class);
+            List<TrackedItem> itemList = itemArray == null ? null : Arrays.asList(itemArray);
 
             if (itemList == null)
             {
